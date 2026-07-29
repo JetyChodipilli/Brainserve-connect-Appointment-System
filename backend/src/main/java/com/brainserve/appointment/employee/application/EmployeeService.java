@@ -17,12 +17,13 @@ import com.brainserve.appointment.shared.application.BusinessException;
 import com.brainserve.appointment.teamlead.api.TeamLeadDirectory;
 import com.brainserve.appointment.manager.api.ManagerDirectory;
 import jakarta.persistence.EntityManager;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.context.ApplicationEventPublisher;
 
 import java.security.SecureRandom;
 import java.time.Instant;
@@ -48,18 +49,32 @@ public class EmployeeService implements EmployeeDirectory, EmployeeStatistics {
     private final ManagerDirectory managers;
     private final SecureRandom random = new SecureRandom();
 
-    public EmployeeService(EmployeeRepository employees, OrganizationDirectory organization,
-                           IdentityProvisioningService identity, EntityManager entityManager,
-                           ApplicationEventPublisher events, AppointmentHostDirectory appointmentHosts,
-                           StaffCommunicationDirectory staff, AuditService audit,
-                           RejectedSecurityAuditService rejectedSecurityAudit,
-                           DepartmentHrDirectory departmentHrs, TeamLeadDirectory teamLeads,
-                           ManagerDirectory managers) {
-        this.employees = employees; this.organization = organization; this.identity = identity;
-        this.entityManager = entityManager; this.events = events; this.appointmentHosts = appointmentHosts;
-        this.staff = staff; this.audit = audit; this.rejectedSecurityAudit = rejectedSecurityAudit;
+    public EmployeeService(
+            EmployeeRepository employees,
+            OrganizationDirectory organization,
+            IdentityProvisioningService identity,
+            EntityManager entityManager,
+            ApplicationEventPublisher events,
+            AppointmentHostDirectory appointmentHosts,
+            StaffCommunicationDirectory staff,
+            AuditService audit,
+            RejectedSecurityAuditService rejectedSecurityAudit,
+            @Lazy DepartmentHrDirectory departmentHrs,
+            @Lazy TeamLeadDirectory teamLeads,
+            @Lazy ManagerDirectory managers
+    ) {
+        this.employees = employees;
+        this.organization = organization;
+        this.identity = identity;
+        this.entityManager = entityManager;
+        this.events = events;
+        this.appointmentHosts = appointmentHosts;
+        this.staff = staff;
+        this.audit = audit;
+        this.rejectedSecurityAudit = rejectedSecurityAudit;
         this.departmentHrs = departmentHrs;
-        this.teamLeads = teamLeads; this.managers = managers;
+        this.teamLeads = teamLeads;
+        this.managers = managers;
     }
 
     @Transactional
@@ -94,8 +109,8 @@ public class EmployeeService implements EmployeeDirectory, EmployeeStatistics {
         return employees.summarizeByDepartment().stream()
                 .filter(value -> departmentScope == null || departmentScope.equals(value.getDepartmentId()))
                 .map(value -> new DepartmentEmployeeSummary(
-                value.getDepartmentId(), value.getTotalEmployees(), value.getActiveEmployees(),
-                value.getOnLeaveEmployees(), value.getOnboardingEmployees())).toList();
+                        value.getDepartmentId(), value.getTotalEmployees(), value.getActiveEmployees(),
+                        value.getOnLeaveEmployees(), value.getOnboardingEmployees())).toList();
     }
 
     @Transactional(readOnly = true)
@@ -120,11 +135,15 @@ public class EmployeeService implements EmployeeDirectory, EmployeeStatistics {
     }
 
     @Transactional(readOnly = true)
-    public Employee get(UUID id) { return employees.findById(id).orElseThrow(this::notFound); }
+    public Employee get(UUID id) {
+        return employees.findById(id).orElseThrow(this::notFound);
+    }
 
     @Override
     @Transactional(readOnly = true)
-    public void requireEmployee(UUID employeeId) { get(employeeId); }
+    public void requireEmployee(UUID employeeId) {
+        get(employeeId);
+    }
 
     @Override
     @Transactional(readOnly = true)
@@ -151,7 +170,9 @@ public class EmployeeService implements EmployeeDirectory, EmployeeStatistics {
 
     @Override
     @Transactional(readOnly = true)
-    public UUID departmentIdForEmployee(UUID employeeId) { return get(employeeId).getDepartmentId(); }
+    public UUID departmentIdForEmployee(UUID employeeId) {
+        return get(employeeId).getDepartmentId();
+    }
 
     @Override
     @Transactional
@@ -286,11 +307,15 @@ public class EmployeeService implements EmployeeDirectory, EmployeeStatistics {
 
     @Override
     @Transactional(readOnly = true)
-    public long totalEmployees() { return employees.count(); }
+    public long totalEmployees() {
+        return employees.count();
+    }
 
     @Override
     @Transactional(readOnly = true)
-    public long activeEmployees() { return employees.countByStatus(EmployeeStatus.ACTIVE); }
+    public long activeEmployees() {
+        return employees.countByStatus(EmployeeStatus.ACTIVE);
+    }
 
     @Override
     @Transactional(readOnly = true)
@@ -413,12 +438,22 @@ public class EmployeeService implements EmployeeDirectory, EmployeeStatistics {
                 : new String[]{normalized.substring(0, separator), normalized.substring(separator + 1)};
     }
 
-    private BusinessException notFound() { return new BusinessException("EMPLOYEE_NOT_FOUND", "Employee was not found", HttpStatus.NOT_FOUND); }
+    private BusinessException notFound() {
+        return new BusinessException("EMPLOYEE_NOT_FOUND", "Employee was not found", HttpStatus.NOT_FOUND);
+    }
+
     public record CreateEmployee(String firstName, String lastName, String officialEmail, String phoneNumber,
-                                 UUID departmentId, String designation, java.time.LocalDate joiningDate) {}
+                                 UUID departmentId, String designation, java.time.LocalDate joiningDate) {
+    }
+
     public record ExecutiveProfile(UUID departmentId, String phoneNumber, String designation,
-                                   java.time.LocalDate joiningDate) {}
-    public record CreatedEmployee(Employee employee, String temporaryPassword) {}
+                                   java.time.LocalDate joiningDate) {
+    }
+
+    public record CreatedEmployee(Employee employee, String temporaryPassword) {
+    }
+
     public record DepartmentEmployeeSummary(UUID departmentId, long totalEmployees, long activeEmployees,
-                                            long onLeaveEmployees, long onboardingEmployees) {}
+                                            long onLeaveEmployees, long onboardingEmployees) {
+    }
 }

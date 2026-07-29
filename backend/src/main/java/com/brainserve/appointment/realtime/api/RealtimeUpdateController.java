@@ -11,13 +11,17 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @RestController
 @RequestMapping("/api/v1/realtime")
 public class RealtimeUpdateController {
+
     private final RealtimeUpdateHub updateHub;
 
     public RealtimeUpdateController(RealtimeUpdateHub updateHub) {
         this.updateHub = updateHub;
     }
 
-    @GetMapping(path = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @GetMapping(
+            path = "/stream",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE
+    )
     @PreAuthorize("isAuthenticated()")
     public SseEmitter stream() {
         return updateHub.connect();
