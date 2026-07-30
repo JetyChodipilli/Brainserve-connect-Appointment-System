@@ -109,7 +109,7 @@ public interface UserAccountRepository extends JpaRepository<UserAccount, UUID> 
             Pageable pageable);
 
     @Query(value = """
-            select distinct account.*
+            select account.*
               from iam_user_account account
              where account.archived = false
                and (:query is null
