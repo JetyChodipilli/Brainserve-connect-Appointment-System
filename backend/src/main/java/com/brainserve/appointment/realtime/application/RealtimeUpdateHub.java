@@ -1,9 +1,6 @@
 package com.brainserve.appointment.realtime.application;
 
 import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.security.authentication.AnonymousAuthenticationToken;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -15,198 +12,42 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class RealtimeUpdateHub {
+    private static final long EMITTER_TIMEOUT_MILLIS = 30L * 60L * 1000L;
+    private final Map<UUID, SseEmitter> emitters = new ConcurrentHashMap<>();
 
-    private static final long SSE_TIMEOUT =
-            30L * 60L * 1000L;
-
-    private final Map<UUID, SseEmitter> emitters =
-            new ConcurrentHashMap<>();
-
-    /**
-     * Connects the currently authenticated user to the realtime SSE stream.
-     */
     public SseEmitter connect() {
-        Authentication authentication =
-                SecurityContextHolder.getContext().getAuthentication();
-
-        if (authentication == null
-                || !authentication.isAuthenticated()
-                || authentication instanceof AnonymousAuthenticationToken) {
-
-            throw new IllegalStateException(
-                    "Authentication is required for realtime updates"
-            );
-        }
-
-        UUID userId = extractUserId(authentication);
-
-        return subscribe(userId);
-    }
-
-    /**
-     * Extracts the user UUID from the authenticated JWT subject.
-     */
-    private UUID extractUserId(Authentication authentication) {
-        String principalName = authentication.getName();
-
-        if (principalName == null || principalName.isBlank()) {
-            throw new IllegalStateException(
-                    "Authenticated user identifier is missing"
-            );
-        }
-
-        try {
-            return UUID.fromString(principalName);
-        } catch (IllegalArgumentException exception) {
-            throw new IllegalStateException(
-                    "Authenticated user identifier is not a valid UUID: "
-                            + principalName,
-                    exception
-            );
-        }
-    }
-
-    /**
-     * Creates and registers an SSE connection for the user.
-     */
-    public SseEmitter subscribe(UUID userId) {
-        if (userId == null) {
-            throw new IllegalArgumentException(
-                    "User ID is required for realtime connection"
-            );
-        }
-
-        SseEmitter emitter = new SseEmitter(SSE_TIMEOUT);
-
-        SseEmitter previous = emitters.put(userId, emitter);
-
-        if (previous != null) {
-            try {
-                previous.complete();
-            } catch (RuntimeException ignored) {
-                // The previous browser connection may already be closed.
-            }
-        }
-
-        Runnable cleanup = () ->
-                emitters.remove(userId, emitter);
-
-        emitter.onCompletion(cleanup);
-
+        UUID connectionId = UUID.randomUUID();
+        SseEmitter emitter = new SseEmitter(EMITTER_TIMEOUT_MILLIS);
+        emitters.put(connectionId, emitter);
+        emitter.onCompletion(() -> emitters.remove(connectionId));
         emitter.onTimeout(() -> {
-            cleanup.run();
-
-            try {
-                emitter.complete();
-            } catch (RuntimeException ignored) {
-                // The response may already be closed.
-            }
+            emitters.remove(connectionId);
+            emitter.complete();
         });
-
-        emitter.onError(error -> cleanup.run());
-
-        send(
-                userId,
-                emitter,
-                "connected",
-                Map.of(
-                        "connected", true,
-                        "timestamp", Instant.now().toString()
-                )
-        );
-
+        emitter.onError(ignored -> emitters.remove(connectionId));
+        send(connectionId, emitter, "connected", "ready");
         return emitter;
     }
 
-    /**
-     * Sends an event to one connected user.
-     */
-    public void publish(
-            UUID userId,
-            String eventName,
-            Object payload
-    ) {
-        if (userId == null
-                || eventName == null
-                || eventName.isBlank()) {
-            return;
-        }
-
-        SseEmitter emitter = emitters.get(userId);
-
-        if (emitter != null) {
-            send(userId, emitter, eventName, payload);
-        }
-    }
-
-    /**
-     * Called by RealtimeWorkspaceListener after a database transaction commits.
-     * It tells every connected frontend to reload workspace data.
-     */
     public void broadcastRefresh() {
-        Map<String, Object> payload = Map.of(
-                "type", "WORKSPACE_REFRESH",
-                "timestamp", Instant.now().toString()
-        );
-
-        emitters.forEach((userId, emitter) ->
-                send(
-                        userId,
-                        emitter,
-                        "refresh",
-                        payload
-                )
-        );
+        emitters.forEach((id, emitter) -> send(id, emitter, "workspace-refresh", "refresh"));
     }
 
-    /**
-     * Sends periodic heartbeat events and removes closed browser connections.
-     */
-    @Scheduled(
-            fixedDelayString =
-                    "${brainserve.realtime.heartbeat-ms:25000}"
-    )
+    @Scheduled(fixedDelay = 25_000L)
     public void heartbeat() {
-        Map<String, Object> payload = Map.of(
-                "timestamp", Instant.now().toString()
-        );
-
-        emitters.forEach((userId, emitter) ->
-                send(
-                        userId,
-                        emitter,
-                        "heartbeat",
-                        payload
-                )
-        );
+        String timestamp = Instant.now().toString();
+        emitters.forEach((id, emitter) -> send(id, emitter, "heartbeat", timestamp));
     }
 
-    /**
-     * Safely sends an SSE event. Closed browser connections are removed
-     * instead of allowing the exception to reach GlobalExceptionHandler.
-     */
-    private void send(
-            UUID userId,
-            SseEmitter emitter,
-            String eventName,
-            Object payload
-    ) {
+    private void send(UUID id, SseEmitter emitter, String eventName, String data) {
         try {
-            SseEmitter.SseEventBuilder event =
-                    SseEmitter.event()
-                            .name(eventName)
-                            .id(UUID.randomUUID().toString())
-                            .data(payload);
-
-            emitter.send(event);
-
-        } catch (IOException | RuntimeException exception) {
-            emitters.remove(userId, emitter);
-
-            /*
-             * Do not call emitter.complete() here.
-             * The servlet response may already be closed or committed.
-             */
+            emitter.send(SseEmitter.event().name(eventName).data(data));
+        } catch (IOException | IllegalStateException exception) {
+            emitters.remove(id);
+            // A failed SSE write normally means the browser closed or replaced
+            // the connection. The servlet container already starts async error
+            // handling for IOException, so redispatching the same client abort
+            // through completeWithError would create a second server failure.
         }
     }
 }

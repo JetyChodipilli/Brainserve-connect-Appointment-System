@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.temporal.TemporalAdjusters;
 import java.util.List;
@@ -102,7 +103,7 @@ public class RoleDashboardQueryService {
     }
 
     private DashboardSummary aggregateMonth(RoleDataScopeService.RoleDataScope scope, DateRange range,
-                                             String scopeType, String scopeKey) {
+                                            String scopeType, String scopeKey) {
         long workforceAtMonthEnd = workforceAt(scope.departmentId(), range.to());
         MapSqlParameterSource parameters = new MapSqlParameterSource().addValue("month", range.from())
                 .addValue("scopeType", scopeType).addValue("scopeKey", scopeKey);
@@ -136,9 +137,12 @@ public class RoleDashboardQueryService {
     }
 
     private DashboardSummary personalSummary(RoleDataScopeService.RoleDataScope scope, DateRange range) {
+        OffsetDateTime from = range.from().atStartOfDay(officeZone).toOffsetDateTime();
+        OffsetDateTime to = range.to().plusDays(1).atStartOfDay(officeZone).toOffsetDateTime();
         MapSqlParameterSource parameters = new MapSqlParameterSource()
-                .addValue("employeeId", scope.employeeId()).addValue("from", range.from().atStartOfDay(officeZone).toInstant())
-                .addValue("to", range.to().plusDays(1).atStartOfDay(officeZone).toInstant());
+                .addValue("employeeId", scope.employeeId())
+                .addValue("from", from)
+                .addValue("to", to);
         return jdbc.queryForObject("""
                 SELECT (SELECT count(*) FROM appointment WHERE host_employee_id = :employeeId
                          AND slot_start >= :from AND slot_start < :to AND status LIKE 'PENDING_%') awaiting_approval,
@@ -199,7 +203,7 @@ public class RoleDashboardQueryService {
         };
         if (value.from() == null || value.to() == null || value.from().isAfter(value.to())
                 || Duration.between(value.from().atStartOfDay(officeZone),
-                    value.to().plusDays(1).atStartOfDay(officeZone)).toDays() > 366) {
+                value.to().plusDays(1).atStartOfDay(officeZone)).toDays() > 366) {
             throw new com.brainserve.appointment.shared.application.BusinessException("INVALID_DASHBOARD_RANGE",
                     "Choose a dashboard range of 366 days or less",
                     org.springframework.http.HttpStatus.BAD_REQUEST);

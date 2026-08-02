@@ -32,7 +32,7 @@ class DepartmentHrAssignmentServiceTest {
         UUID actorId = UUID.randomUUID(); UUID hrUserId = UUID.randomUUID(); UUID employeeId = UUID.randomUUID();
         UUID previousDepartmentId = UUID.randomUUID(); UUID targetDepartmentId = UUID.randomUUID();
         var previous = new DepartmentHrAssignment(previousDepartmentId, hrUserId, employeeId, actorId);
-        when(organization.requireActiveDepartment(targetDepartmentId))
+        when(organization.lockActiveDepartment(targetDepartmentId))
                 .thenReturn(new OrganizationDirectory.ActiveDepartment(targetDepartmentId, "PRODUCT", "Product"));
         when(staff.requireActive(hrUserId)).thenReturn(new StaffCommunicationDirectory.StaffMember(
                 hrUserId, employeeId, "Department HR", "hr@brainserve.in", Set.of("ROLE_HR_ADMIN")));

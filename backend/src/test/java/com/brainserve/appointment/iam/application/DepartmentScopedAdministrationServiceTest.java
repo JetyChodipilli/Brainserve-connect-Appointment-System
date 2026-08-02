@@ -57,14 +57,14 @@ class DepartmentScopedAdministrationServiceTest {
     }
 
     @Test
-    void hrCanManagePermissionOverridesForAMultiRoleAccountInTheirDepartment() {
+    void hrCanManagePermissionOverridesForATeamLeadAccountInTheirDepartment() {
         UUID actorId = UUID.randomUUID();
         UUID targetId = UUID.randomUUID();
         UUID departmentId = UUID.randomUUID();
         UUID targetEmployeeId = UUID.randomUUID();
         UserAccount actor = account(actorId, null, Set.of(SystemRole.ROLE_HR_ADMIN));
         UserAccount target = account(targetId, targetEmployeeId,
-                Set.of(SystemRole.ROLE_EMPLOYEE, SystemRole.ROLE_TEAM_LEAD));
+                Set.of(SystemRole.ROLE_TEAM_LEAD));
         when(users.findById(actorId)).thenReturn(Optional.of(actor));
         when(users.findById(targetId)).thenReturn(Optional.of(target));
         when(departmentHrs.requireForUser(actorId)).thenReturn(new DepartmentHrDirectory.Assignment(

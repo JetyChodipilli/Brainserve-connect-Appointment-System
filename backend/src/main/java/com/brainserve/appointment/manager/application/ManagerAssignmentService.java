@@ -88,6 +88,34 @@ public class ManagerAssignmentService implements ManagerDirectory {
 
     @Override
     @Transactional
+    public void endForRoleTransition(UUID actorUserId, UUID managerUserId) {
+        assignments.findByManagerUserIdAndActiveTrue(managerUserId)
+                .ifPresent(assignment -> {
+                    assignment.end(actorUserId);
+                    assignments.saveAndFlush(assignment);
+                    audit.record("DEPARTMENT_MANAGER_ASSIGNMENT_ENDED_FOR_ROLE_TRANSITION",
+                            "DEPARTMENT", assignment.getDepartmentId().toString(),
+                            "{\"managerUserId\":\"" + managerUserId + "\"}");
+                });
+    }
+
+    @Override
+    @Transactional
+    public void assignForRoleTransition(UUID actorUserId, UUID departmentId, UUID managerUserId,
+                                        UUID managerEmployeeId) {
+        StaffCommunicationDirectory.StaffMember manager = staff.requireActive(managerUserId);
+        if (!manager.roles().equals(Set.of(MANAGER))
+                || manager.employeeId() == null
+                || !manager.employeeId().equals(managerEmployeeId)) {
+            throw new BusinessException("DEPARTMENT_MANAGER_EMPLOYEE_LINK_MISMATCH",
+                    "The Manager account must be active and linked to the supplied employee profile",
+                    HttpStatus.UNPROCESSABLE_ENTITY);
+        }
+        assign(actorUserId, departmentId, managerUserId);
+    }
+
+    @Override
+    @Transactional
     public void replaceForAccountClosure(UUID actorUserId, UUID closingManagerUserId,
                                          UUID replacementManagerUserId) {
         DepartmentManagerAssignment current = assignments

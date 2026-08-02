@@ -13,7 +13,8 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
+import java.sql.Types;
+import java.time.ZoneOffset;
 import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -51,14 +52,65 @@ public class RoleAwareHistoryQueryService {
         UUID departmentId = scopes.effectiveDepartment(scope, filter.departmentId());
         Cursor cursor = decode(filter.cursor());
         MapSqlParameterSource parameters = new MapSqlParameterSource()
-                .addValue("from", filter.from()).addValue("to", filter.to())
-                .addValue("departmentId", departmentId).addValue("status", filter.status())
-                .addValue("query", filter.query() == null ? null : "%" + escapeLike(filter.query()) + "%")
-                .addValue("cursorTime", cursor == null ? null : cursor.occurredAt())
-                .addValue("cursorId", cursor == null ? null : cursor.id())
-                .addValue("employeeId", scope.employeeId()).addValue("userId", actorUserId)
-                .addValue("officeZone", officeZone)
-                .addValue("limit", filter.size() + 1);
+                .addValue(
+                        "from",
+                        filter.from().atOffset(ZoneOffset.UTC),
+                        Types.TIMESTAMP_WITH_TIMEZONE
+                )
+                .addValue(
+                        "to",
+                        filter.to().atOffset(ZoneOffset.UTC),
+                        Types.TIMESTAMP_WITH_TIMEZONE
+                )
+                .addValue(
+                        "departmentId",
+                        departmentId,
+                        Types.OTHER
+                )
+                .addValue(
+                        "status",
+                        filter.status(),
+                        Types.VARCHAR
+                )
+                .addValue(
+                        "query",
+                        filter.query() == null
+                                ? null
+                                : "%" + escapeLike(filter.query()) + "%",
+                        Types.VARCHAR
+                )
+                .addValue(
+                        "cursorTime",
+                        cursor == null
+                                ? null
+                                : cursor.occurredAt().atOffset(ZoneOffset.UTC),
+                        Types.TIMESTAMP_WITH_TIMEZONE
+                )
+                .addValue(
+                        "cursorId",
+                        cursor == null ? null : cursor.id(),
+                        Types.OTHER
+                )
+                .addValue(
+                        "employeeId",
+                        scope.employeeId(),
+                        Types.OTHER
+                )
+                .addValue(
+                        "userId",
+                        actorUserId,
+                        Types.OTHER
+                )
+                .addValue(
+                        "officeZone",
+                        officeZone,
+                        Types.VARCHAR
+                )
+                .addValue(
+                        "limit",
+                        filter.size() + 1,
+                        Types.INTEGER
+                );
         String sql = sql(dataset, scope, departmentId, filter, cursor);
         List<HistoryRow> loaded = jdbc.query(sql, parameters, (rs, rowNumber) -> map(rs, dataset));
         boolean hasMore = loaded.size() > filter.size();

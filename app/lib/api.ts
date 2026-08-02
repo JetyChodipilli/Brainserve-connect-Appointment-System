@@ -85,7 +85,7 @@ export type EssentialLogRecord = { id: string; category: string; eventType: stri
   subjectId: string; referenceId: string | null; actorUserId: string | null; approverUserId: string | null;
   status: string; title: string; detail: string; occurredAt: string };
 export type AccountClosureStatus = "REQUESTED" | "BUSINESS_APPROVED" | "PENDING_SYSTEM_ADMIN"
-  | "SCHEDULED" | "ARCHIVED" | "REJECTED" | "CANCELLED";
+    | "SCHEDULED" | "ARCHIVED" | "REJECTED" | "CANCELLED";
 export type AccountClosureRequest = { id: string; targetUserId: string; targetName: string; targetEmail: string;
   targetRole: string; employeeId: string | null; departmentId: string | null; departmentName: string | null;
   requesterUserId: string; origin: "SELF_SERVICE" | "SYSTEM_ADMIN_EMERGENCY" | "EMPLOYEE_TERMINATION";
@@ -346,7 +346,7 @@ export type RetentionPolicy = { dataset: string; hotDays: number; warmMonths: nu
   disposalAction: "DELETE" | "ANONYMIZE"; enabled: boolean; updatedAt: string; updatedBy: string };
 export type ArchiveManifest = { dataset: string; partitionName: string; periodStart: string; periodEnd: string;
   rowCount: number; status: "WARM" | "ARCHIVE_ELIGIBLE" | "ARCHIVING" | "ARCHIVED" | "VERIFYING"
-    | "VERIFIED" | "DATABASE_REMOVED" | "HOLD_BLOCKED" | "FAILED" | "DISPOSED";
+      | "VERIFIED" | "DATABASE_REMOVED" | "HOLD_BLOCKED" | "FAILED" | "DISPOSED";
   objectKey: string | null; checksumSha256: string | null; encryptionAlgorithm: string | null;
   encryptionKeyVersion: string | null; objectSizeBytes: number; verifiedAt: string | null;
   restoreTestedAt: string | null; verifiedRowCount: number | null; databaseRemovedAt: string | null;
@@ -425,7 +425,7 @@ async function refreshAccessToken() {
       setAuthTokens(tokens.accessToken, tokens.refreshToken);
       return true;
     }).catch(() => false)
-      .finally(() => { clearTimeout(timeout); refreshPromise = null; });
+        .finally(() => { clearTimeout(timeout); refreshPromise = null; });
   }
   return refreshPromise;
 }
@@ -490,13 +490,13 @@ async function allSpringPageContent<T>(path: string, pageSize = 200): Promise<{ 
   let page = 0;
   while (true) {
     const result = await apiRequest<SpringPage<T>>(
-      `${path}${separator}page=${page}&size=${pageSize}`,
-      { cache: "no-store" },
+        `${path}${separator}page=${page}&size=${pageSize}`,
+        { cache: "no-store" },
     );
     content.push(...result.content);
     const isLast = result.last ?? (result.totalPages !== undefined
-      ? page + 1 >= result.totalPages
-      : result.content.length < pageSize);
+        ? page + 1 >= result.totalPages
+        : result.content.length < pageSize);
     if (isLast) return { content };
     page += 1;
   }
@@ -508,8 +508,8 @@ async function allSpringPageContent<T>(path: string, pageSize = 200): Promise<{ 
  * the client to reload the endpoints already authorized for its signed-in role.
  */
 export function subscribeToWorkspaceUpdates(
-  onUpdate: () => void,
-  onStateChange: (state: RealtimeConnectionState) => void,
+    onUpdate: () => void,
+    onStateChange: (state: RealtimeConnectionState) => void,
 ) {
   let stopped = false;
   let controller: AbortController | null = null;
@@ -578,7 +578,7 @@ export function subscribeToWorkspaceUpdates(
     } catch (reason) {
       clearTimeout(handshakeTimeout);
       if (!stopped && (handshakeTimedOut
-        || !(reason instanceof DOMException && reason.name === "AbortError"))) scheduleReconnect();
+          || !(reason instanceof DOMException && reason.name === "AbortError"))) scheduleReconnect();
     }
   };
 
@@ -681,7 +681,7 @@ export const brainServeApi = {
     return apiRequest<ProvisioningAccount>(`/admin/users/${id}/${decision}`, {
       method: "POST",
       body: decision === "approve" ? (onboarding ? JSON.stringify(onboarding) : undefined)
-        : JSON.stringify({ reason }),
+          : JSON.stringify({ reason }),
     });
   },
   pendingCeoUsers() {
@@ -697,10 +697,13 @@ export const brainServeApi = {
   pendingHrUsers() {
     return apiRequest<ProvisioningAccount[]>("/hr/users");
   },
-  decideHrUser(id: string, decision: "approve" | "reject", reason = "") {
+  decideHrUser(id: string, decision: "approve" | "reject",
+               onboarding?: HrAccountApprovalInput, reason = "") {
     return apiRequest<ProvisioningAccount>(`/hr/users/${id}/${decision}`, {
       method: "POST",
-      body: JSON.stringify({ reason }),
+      body: decision === "approve"
+          ? (onboarding ? JSON.stringify(onboarding) : undefined)
+          : JSON.stringify({ reason }),
     });
   },
   createAppointment(payload: unknown, idempotencyKey: string) {
@@ -721,8 +724,8 @@ export const brainServeApi = {
   },
   requestAppointmentCancellationOtp(reference: string) {
     return apiRequest<void>(
-      `/public/appointments/${encodeURIComponent(reference.toUpperCase())}/cancel/request-otp`,
-      { method: "POST" });
+        `/public/appointments/${encodeURIComponent(reference.toUpperCase())}/cancel/request-otp`,
+        { method: "POST" });
   },
   cancelAppointment(reference: string, otp: string) {
     return apiRequest<PublicAppointment>(`/public/appointments/${encodeURIComponent(reference.toUpperCase())}/cancel`, {
@@ -744,7 +747,7 @@ export const brainServeApi = {
   },
   publicDepartments() {
     return apiRequest<Array<{ id: string; code: string; name: string; active: boolean; version: number }>>(
-      "/public/departments", { cache: "no-store" },
+        "/public/departments", { cache: "no-store" },
     );
   },
   availableSlots(employeeId: string, date: string, appointmentType: string) {
@@ -780,9 +783,9 @@ export const brainServeApi = {
   },
   retentionPolicies() { return apiRequest<RetentionPolicy[]>("/admin/data-governance/retention-policies"); },
   updateRetentionPolicy(dataset: string, payload: Pick<RetentionPolicy,
-    "hotDays" | "warmMonths" | "archiveYears" | "disposalAction" | "enabled">) {
+      "hotDays" | "warmMonths" | "archiveYears" | "disposalAction" | "enabled">) {
     return apiRequest<RetentionPolicy>(`/admin/data-governance/retention-policies/${encodeURIComponent(dataset)}`,
-      { method: "PUT", body: JSON.stringify(payload) });
+        { method: "PUT", body: JSON.stringify(payload) });
   },
   archiveManifests() { return apiRequest<ArchiveManifest[]>("/admin/data-governance/archive-manifests"); },
   governanceOverview() { return apiRequest<GovernanceOverview>("/admin/data-governance/overview"); },
@@ -791,11 +794,11 @@ export const brainServeApi = {
     scopeType: DataLegalHold["scopeType"]; scopeRef: string | null; caseReference: string;
     reason: string; reviewOn: string | null }) {
     return apiRequest<DataLegalHold>("/admin/data-governance/legal-holds",
-      { method: "POST", body: JSON.stringify(payload) });
+        { method: "POST", body: JSON.stringify(payload) });
   },
   releaseDataLegalHold(holdId: string, reason: string) {
     return apiRequest<DataLegalHold>(`/admin/data-governance/legal-holds/${encodeURIComponent(holdId)}/release`,
-      { method: "POST", body: JSON.stringify({ reason }) });
+        { method: "POST", body: JSON.stringify({ reason }) });
   },
   governanceLedger(size = 50) {
     return apiRequest<GovernanceLedgerPage>(`/admin/data-governance/ledger?size=${size}`);
@@ -905,21 +908,21 @@ export const brainServeApi = {
     if (query.trim()) params.set("query", query.trim());
     return apiRequest<SpringPage<{ userId: string; employeeId: string; fullName: string;
       email: string; role: string; departmentId: string }>>(
-      `/admin/role-transitions/candidates?${params}`, { cache: "no-store" });
+        `/admin/role-transitions/candidates?${params}`, { cache: "no-store" });
   },
   succeedChiefExecutive(currentCeoUserId: string, successorUserId: string,
                         formerCeoDepartmentId: string, reason: string) {
     return apiRequest<{ formerCeoUserId: string; successorCeoUserId: string;
       formerCeoDepartmentId: string; changedAt: string }>(
-      "/admin/role-transitions/ceo-succession", {
-        method: "POST",
-        body: JSON.stringify({ currentCeoUserId, successorUserId, formerCeoDepartmentId, reason }),
-      });
+        "/admin/role-transitions/ceo-succession", {
+          method: "POST",
+          body: JSON.stringify({ currentCeoUserId, successorUserId, formerCeoDepartmentId, reason }),
+        });
   },
   departmentHrCandidates() {
     return apiRequest<Array<{ userId: string; employeeId: string; fullName: string; email: string;
       currentDepartmentId: string | null; currentDepartmentCode: string | null; currentDepartmentName: string | null }>>(
-      "/department-hrs/candidates");
+        "/department-hrs/candidates");
   },
   assignDepartmentHr(departmentId: string, hrUserId: string) {
     return apiRequest<DepartmentHrAssignment>("/department-hrs/assignments", {
@@ -946,13 +949,13 @@ export const brainServeApi = {
   },
   myTeamLeadWorkspace() {
     return apiRequest<{ assignment: { assignmentId: string; departmentId: string; teamLeadUserId: string;
-      teamLeadEmployeeId: string; fullName: string; email: string };
+        teamLeadEmployeeId: string; fullName: string; email: string };
       department: { id: string; code: string; name: string };
       employees: SpringPage<DepartmentEmployee> }>("/team-leads/me/workspace?page=0&size=50&sort=displayName,asc");
   },
   createEmployee(payload: unknown) {
     return apiRequest<{ employee: { id: string; employeeNumber: string; displayName: string;
-      officialEmail: string; departmentId: string; designation: string; status: string } }>("/employees", {
+        officialEmail: string; departmentId: string; designation: string; status: string } }>("/employees", {
       method: "POST", body: JSON.stringify(payload),
     });
   },
@@ -1036,7 +1039,7 @@ export const brainServeApi = {
     if (filters.role && filters.role !== "ALL") params.set("role", filters.role);
     if (filters.departmentId) params.set("departmentId", filters.departmentId);
     return apiRequest<SpringPage<AccountLifecycleAccount>>(
-      `/admin/account-closures/active-accounts?${params}`, { cache: "no-store" });
+        `/admin/account-closures/active-accounts?${params}`, { cache: "no-store" });
   },
   archivedAccountPage(filters: { query?: string; page?: number; size?: number } = {}) {
     const params = new URLSearchParams({
@@ -1045,7 +1048,7 @@ export const brainServeApi = {
     });
     if (filters.query?.trim()) params.set("query", filters.query.trim());
     return apiRequest<SpringPage<ArchivedAccount>>(
-      `/admin/account-closures/archived?${params}`, { cache: "no-store" });
+        `/admin/account-closures/archived?${params}`, { cache: "no-store" });
   },
   accountClosureHistory(id: string) {
     return apiRequest<AccountLifecycleRecord[]>(`/admin/account-closures/${id}/history`);
@@ -1058,7 +1061,7 @@ export const brainServeApi = {
   },
   activeDirectArchiveChallenge() {
     return apiRequest<DirectArchiveChallenge | undefined>(
-      "/admin/account-closures/direct-archive/challenge", { cache: "no-store" });
+        "/admin/account-closures/direct-archive/challenge", { cache: "no-store" });
   },
   requestDirectArchiveOtp(targetUserId: string, currentPassword: string, reason: string,
                           replacementUserId: string | null) {
@@ -1068,11 +1071,11 @@ export const brainServeApi = {
   },
   resendDirectArchiveOtp(challengeId: string) {
     return apiRequest<DirectArchiveChallenge>(
-      `/admin/account-closures/direct-archive/challenge/${challengeId}/resend`, { method: "POST" });
+        `/admin/account-closures/direct-archive/challenge/${challengeId}/resend`, { method: "POST" });
   },
   cancelDirectArchiveChallenge(challengeId: string) {
     return apiRequest<void>(
-      `/admin/account-closures/direct-archive/challenge/${challengeId}`, { method: "DELETE" });
+        `/admin/account-closures/direct-archive/challenge/${challengeId}`, { method: "DELETE" });
   },
   directArchiveAccount(challengeId: string, otp: string) {
     return apiRequest<AccountClosureRequest>("/admin/account-closures/direct-archive", {
@@ -1081,24 +1084,24 @@ export const brainServeApi = {
   },
   activeArchivedRecoveryChallenge() {
     return apiRequest<ArchivedRecoveryChallenge | undefined>(
-      "/admin/account-closures/archived-recovery/challenge", { cache: "no-store" });
+        "/admin/account-closures/archived-recovery/challenge", { cache: "no-store" });
   },
   requestArchivedRecoveryOtp(payload: {
     archivedAccountId: string; targetRole: string; departmentId: string | null;
     currentPassword: string; reason: string;
   }) {
     return apiRequest<ArchivedRecoveryChallenge>(
-      "/admin/account-closures/archived-recovery/request-otp", {
-        method: "POST", body: JSON.stringify(payload),
-      });
+        "/admin/account-closures/archived-recovery/request-otp", {
+          method: "POST", body: JSON.stringify(payload),
+        });
   },
   resendArchivedRecoveryOtp(challengeId: string) {
     return apiRequest<ArchivedRecoveryChallenge>(
-      `/admin/account-closures/archived-recovery/challenge/${challengeId}/resend`, { method: "POST" });
+        `/admin/account-closures/archived-recovery/challenge/${challengeId}/resend`, { method: "POST" });
   },
   cancelArchivedRecoveryChallenge(challengeId: string) {
     return apiRequest<void>(
-      `/admin/account-closures/archived-recovery/challenge/${challengeId}`, { method: "DELETE" });
+        `/admin/account-closures/archived-recovery/challenge/${challengeId}`, { method: "DELETE" });
   },
   recoverArchivedAccount(challengeId: string, otp: string) {
     return apiRequest<RecoveredAccount>("/admin/account-closures/archived-recovery", {
@@ -1166,7 +1169,7 @@ export const brainServeApi = {
   checkInByReference(referenceNumber: string) {
     return apiRequest<{ id: string; appointmentId: string; visitorName: string; badgeNumber: string;
       checkedInAt: string; checkedOutAt: string | null; processedBy: string }>(
-      `/reception/appointments/reference/${encodeURIComponent(referenceNumber.toUpperCase())}/check-in`, { method: "POST" });
+        `/reception/appointments/reference/${encodeURIComponent(referenceNumber.toUpperCase())}/check-in`, { method: "POST" });
   },
   visitorsInside() {
     return apiRequest<Array<{ id: string; appointmentId: string; visitorName: string; badgeNumber: string;
@@ -1183,7 +1186,7 @@ export const brainServeApi = {
     });
     return apiRequest<CountedCursorPage<{ id: string; occurredAt: string; actorId: string; eventType: string;
       targetType: string; targetId: string; outcome: string; correlationId: string | null }>>(
-      `/audit-events?${params}`, { cache: "no-store" });
+        `/audit-events?${params}`, { cache: "no-store" });
   },
   essentialLogs(filters: { from?: string; to?: string; category?: string; status?: string;
     query?: string; cursor?: string; size?: number } = {}) {
@@ -1263,7 +1266,7 @@ export const brainServeApi = {
   },
   employeeDocuments(employeeId: string) {
     return apiRequest<EmployeeDocument[]>(
-      `/documents?ownerType=EMPLOYEE&ownerId=${encodeURIComponent(employeeId)}`, { cache: "no-store" });
+        `/documents?ownerType=EMPLOYEE&ownerId=${encodeURIComponent(employeeId)}`, { cache: "no-store" });
   },
   uploadEmployeeDocument(employeeId: string, category: EmployeeDocument["category"], file: File) {
     const body = new FormData();
@@ -1298,8 +1301,8 @@ export const brainServeApi = {
     return apiRequest<{ unreadCount: number }>("/internal-notifications/unread-count");
   },
   sendInternalNotification(recipientUserId: string, message: string,
-    priority: InternalNotification["priority"] = "NORMAL",
-    category: InternalNotification["category"] = "GENERAL") {
+                           priority: InternalNotification["priority"] = "NORMAL",
+                           category: InternalNotification["category"] = "GENERAL") {
     return apiRequest<InternalNotification>("/internal-notifications", {
       method: "POST", body: JSON.stringify({ recipientUserId, message, priority, category }),
     });
@@ -1323,7 +1326,7 @@ export const brainServeApi = {
     });
   },
   decideResourceDiscussion(id: string, action: "SCHEDULE" | "REQUEST_INFORMATION" | "DECLINE",
-    response: string, scheduledAt: string | null) {
+                           response: string, scheduledAt: string | null) {
     return apiRequest<ResourceDiscussion>(`/resource-discussions/${id}/hr-action`, {
       method: "POST", body: JSON.stringify({ action, response, scheduledAt }),
     });

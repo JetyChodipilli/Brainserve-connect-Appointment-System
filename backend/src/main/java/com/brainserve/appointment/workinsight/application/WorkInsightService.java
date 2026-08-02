@@ -9,9 +9,8 @@ import com.brainserve.appointment.shared.application.BusinessException;
 import com.brainserve.appointment.workinsight.api.WorkInsightEvents;
 import com.brainserve.appointment.workinsight.domain.WorkTaskAuditRecord;
 import com.brainserve.appointment.workinsight.infrastructure.WorkTaskAuditRecordRepository;
-import com.brainserve.appointment.worktask.domain.DepartmentWorkTask;
-import com.brainserve.appointment.worktask.domain.WorkTaskStatus;
-import com.brainserve.appointment.worktask.infrastructure.DepartmentWorkTaskRepository;
+import com.brainserve.appointment.worktask.api.WorkTaskDirectory;
+import com.brainserve.appointment.worktask.api.WorkTaskDirectory.TaskSnapshot;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -29,7 +28,7 @@ public class WorkInsightService {
     private static final String CEO = "ROLE_CEO";
     private static final String SYSTEM_ADMIN = "ROLE_SYSTEM_ADMIN";
     private final ZoneId officeZone;
-    private final DepartmentWorkTaskRepository tasks;
+    private final WorkTaskDirectory tasks;
     private final WorkTaskAuditRecordRepository audits;
     private final EmployeeDirectory employees;
     private final StaffCommunicationDirectory staff;
@@ -38,7 +37,7 @@ public class WorkInsightService {
     private final DepartmentHrDirectory departmentHrs;
     private final ManagerDirectory managers;
 
-    public WorkInsightService(DepartmentWorkTaskRepository tasks, WorkTaskAuditRecordRepository audits,
+    public WorkInsightService(WorkTaskDirectory tasks, WorkTaskAuditRecordRepository audits,
                               EmployeeDirectory employees, StaffCommunicationDirectory staff,
                               ApplicationEventPublisher events, AuditService audit,
                               DepartmentHrDirectory departmentHrs,
@@ -60,9 +59,9 @@ public class WorkInsightService {
             Map<UUID, WorkTaskAuditRecord> retained = new HashMap<>();
             audits.findTop1000ByWeekStartOrderByHrAuditedAtDesc(weekStart)
                     .forEach(record -> retained.put(record.getWorkTaskId(), record));
-            return tasks.findTop500ByDepartmentIdOrderByCreatedAtDesc(departmentId).stream()
-                    .filter(task -> weekStart(task.getCreatedAt()).equals(weekStart))
-                    .map(task -> liveInsight(task, retained.get(task.getId()))).toList();
+            return tasks.recentForDepartment(departmentId).stream()
+                    .filter(task -> weekStart(task.createdAt()).equals(weekStart))
+                    .map(task -> liveInsight(task, retained.get(task.id()))).toList();
         }
         if (roles.contains(MANAGER)) {
             UUID departmentId = managers.requireForUser(actorUserId).departmentId();
@@ -81,41 +80,42 @@ public class WorkInsightService {
     @Transactional
     public Insight markAudited(UUID hrUserId, UUID workTaskId) {
         requireRole(hrUserId, HR, "Only HR can audit a worksheet");
-        DepartmentWorkTask task = tasks.findById(workTaskId).orElseThrow(() -> new BusinessException(
-                "WORK_TASK_NOT_FOUND", "The worksheet was not found", HttpStatus.NOT_FOUND));
-        departmentHrs.requireAssignedReviewer(task.getDepartmentId(), hrUserId);
-        if (task.getStatus() != WorkTaskStatus.APPROVED && task.getStatus() != WorkTaskStatus.ACKNOWLEDGED) {
-            throw new BusinessException("WORK_INSIGHT_TASK_NOT_FINAL",
-                    "HR can audit a worksheet only after Team Lead approval", HttpStatus.CONFLICT);
-        }
+        TaskSnapshot task = requireFinalTask(
+                workTaskId,
+                "HR can audit a worksheet only after Team Lead approval"
+        );
+        departmentHrs.requireAssignedReviewer(task.departmentId(), hrUserId);
         WorkTaskAuditRecord record = audits.findByWorkTaskId(workTaskId).orElse(null);
         if (record == null) record = audits.saveAndFlush(newRecord(task, hrUserId));
         else if (record.getAuditStatus() == com.brainserve.appointment.workinsight.domain.WorkInsightStatus.REWORK_ASSIGNED) {
-            record.resubmit(hrUserId, task.getStatus().name());
+            record.resubmit(hrUserId, task.status());
         } else return retainedInsight(record);
         events.publishEvent(new WorkInsightEvents.HrAuditSubmitted(hrUserId,
-                "HR audited worksheet ‘" + task.getTitle() + "’ for " + employee(task).displayName()
-                        + " in " + task.getDepartmentBranch() + ". CEO approval is required."));
+                "HR audited worksheet ‘" + task.title() + "’ for " + employee(task).displayName()
+                        + " in " + task.departmentBranch() + ". CEO approval is required."));
         audit.record("WORK_INSIGHT_HR_AUDITED", "WORK_TASK_AUDIT", record.getId().toString(),
-                "{\"workTaskId\":\"" + task.getId() + "\"}");
+                "{\"workTaskId\":\"" + task.id() + "\"}");
         return retainedInsight(record);
     }
 
     @Transactional
     public Insight requestHrRework(UUID hrUserId, UUID workTaskId, String reason) {
         requireRole(hrUserId, HR, "Only HR can return an Insights worksheet for rework");
-        DepartmentWorkTask task = requireFinalTask(workTaskId);
-        departmentHrs.requireAssignedReviewer(task.getDepartmentId(), hrUserId);
+        TaskSnapshot task = requireFinalTask(
+                workTaskId,
+                "Insights can return work only after Team Lead approval"
+        );
+        departmentHrs.requireAssignedReviewer(task.departmentId(), hrUserId);
         WorkTaskAuditRecord record = audits.findByWorkTaskId(workTaskId)
                 .orElseGet(() -> audits.saveAndFlush(newRecord(task, hrUserId)));
         record.requestHrRework(hrUserId, reason);
-        task.requestInsightRework("HR", reason);
-        record.syncTaskStatus(task.getStatus().name());
-        events.publishEvent(new WorkInsightEvents.ReworkRequested(hrUserId, task.getTeamLeadUserId(),
-                "HR returned worksheet ‘" + task.getTitle() + "’ for rework. Flaws noted: " + reason.trim()
+        TaskSnapshot reworked = tasks.requestInsightRework(workTaskId, "HR", reason);
+        record.syncTaskStatus(reworked.status());
+        events.publishEvent(new WorkInsightEvents.ReworkRequested(hrUserId, reworked.teamLeadUserId(),
+                "HR returned worksheet ‘" + reworked.title() + "’ for rework. Flaws noted: " + reason.trim()
                         + ". Open Work Board and send corrective guidance to the employee."));
         audit.record("WORK_INSIGHT_HR_REWORK_REQUESTED", "WORK_TASK_AUDIT", record.getId().toString(),
-                "{\"workTaskId\":\"" + task.getId() + "\",\"cycle\":" + record.getReworkCycle() + "}");
+                "{\"workTaskId\":\"" + reworked.id() + "\",\"cycle\":" + record.getReworkCycle() + "}");
         return retainedInsight(record);
     }
 
@@ -126,19 +126,17 @@ public class WorkInsightService {
         if (!record.getTeamLeadUserId().equals(teamLeadUserId)) throw new BusinessException(
                 "WORK_INSIGHT_TEAM_LEAD_SCOPE_DENIED", "This rework request belongs to another Team Lead",
                 HttpStatus.FORBIDDEN);
-        DepartmentWorkTask task = tasks.findById(workTaskId).orElseThrow(() -> new BusinessException(
-                "WORK_TASK_NOT_FOUND", "The worksheet was not found", HttpStatus.NOT_FOUND));
-        task.assignInsightRework(guidance);
-        record.assignRework(guidance, task.getStatus().name());
-        UUID employeeUserId = staff.activeByEmployeeId(task.getEmployeeId())
+        TaskSnapshot task = tasks.assignInsightRework(workTaskId, guidance);
+        record.assignRework(guidance, task.status());
+        UUID employeeUserId = staff.activeByEmployeeId(task.employeeId())
                 .map(StaffCommunicationDirectory.StaffMember::userId)
                 .orElseThrow(() -> new BusinessException("WORK_TASK_EMPLOYEE_LOGIN_REQUIRED",
                         "The assigned Employee login is no longer active", HttpStatus.CONFLICT));
         events.publishEvent(new WorkInsightEvents.ReworkAssigned(teamLeadUserId, employeeUserId,
-                "Your worksheet ‘" + task.getTitle() + "’ was returned by " + record.getReworkRequestedByRole()
+                "Your worksheet ‘" + task.title() + "’ was returned by " + record.getReworkRequestedByRole()
                         + ". Team Lead rework guidance: " + guidance.trim() + ". Open Work Board to update and resubmit it."));
         audit.record("WORK_INSIGHT_REWORK_ASSIGNED", "WORK_TASK_AUDIT", record.getId().toString(),
-                "{\"workTaskId\":\"" + task.getId() + "\",\"cycle\":" + record.getReworkCycle() + "}");
+                "{\"workTaskId\":\"" + task.id() + "\",\"cycle\":" + record.getReworkCycle() + "}");
         return liveInsight(task, record);
     }
 
@@ -149,9 +147,12 @@ public class WorkInsightService {
                 "WORK_INSIGHT_NOT_FOUND", "The weekly work audit was not found", HttpStatus.NOT_FOUND));
         record.decide(ceoUserId, approved, remarks);
         if (!approved) {
-            DepartmentWorkTask task = requireFinalTask(record.getWorkTaskId());
-            task.requestInsightRework("CEO", remarks);
-            record.syncTaskStatus(task.getStatus().name());
+            requireFinalTask(
+                    record.getWorkTaskId(),
+                    "Insights can return work only after Team Lead approval"
+            );
+            TaskSnapshot task = tasks.requestInsightRework(record.getWorkTaskId(), "CEO", remarks);
+            record.syncTaskStatus(task.status());
             events.publishEvent(new WorkInsightEvents.ReworkRequested(ceoUserId, record.getTeamLeadUserId(),
                     "CEO returned worksheet ‘" + record.getTaskTitle() + "’ for rework. Flaws noted: "
                             + remarks.trim() + ". Open Work Board and send corrective guidance to the employee."));
@@ -166,14 +167,14 @@ public class WorkInsightService {
         return retainedInsight(record);
     }
 
-    private Insight liveInsight(DepartmentWorkTask task, WorkTaskAuditRecord record) {
-        EmployeeDirectory.EmployeeSummary employee = employees.employeeSummary(task.getEmployeeId());
-        String teamLeadName = staff.findByUserId(task.getTeamLeadUserId())
+    private Insight liveInsight(TaskSnapshot task, WorkTaskAuditRecord record) {
+        EmployeeDirectory.EmployeeSummary employee = employees.employeeSummary(task.employeeId());
+        String teamLeadName = staff.findByUserId(task.teamLeadUserId())
                 .map(StaffCommunicationDirectory.StaffMember::fullName).orElse("Former Team Lead");
-        return new Insight(record == null ? null : record.getId(), task.getId(), weekStart(task.getCreatedAt()),
-                task.getDepartmentId(), task.getDepartmentBranch(), task.getEmployeeId(), employee.employeeNumber(),
-                employee.displayName(), task.getTeamLeadUserId(), teamLeadName, task.getTitle(),
-                task.getStatus().name(), record == null ? "NOT_AUDITED" : record.getAuditStatus().name(),
+        return new Insight(record == null ? null : record.getId(), task.id(), weekStart(task.createdAt()),
+                task.departmentId(), task.departmentBranch(), task.employeeId(), employee.employeeNumber(),
+                employee.displayName(), task.teamLeadUserId(), teamLeadName, task.title(),
+                task.status(), record == null ? "NOT_AUDITED" : record.getAuditStatus().name(),
                 record == null ? null : record.getHrAuditedAt(), record == null ? null : record.getCeoDecidedAt(),
                 record == null ? null : record.getCeoRemarks(), record == null ? null : record.getReworkRequestedByRole(),
                 record == null ? null : record.getReworkReason(), record == null ? null : record.getReworkRequestedAt(),
@@ -191,27 +192,26 @@ public class WorkInsightService {
                 record.getTeamLeadReworkGuidance(), record.getTeamLeadRespondedAt(), record.getReworkCycle());
     }
 
-    private DepartmentWorkTask requireFinalTask(UUID workTaskId) {
-        DepartmentWorkTask task = tasks.findById(workTaskId).orElseThrow(() -> new BusinessException(
-                "WORK_TASK_NOT_FOUND", "The worksheet was not found", HttpStatus.NOT_FOUND));
-        if (task.getStatus() != WorkTaskStatus.APPROVED && task.getStatus() != WorkTaskStatus.ACKNOWLEDGED) {
+    private TaskSnapshot requireFinalTask(UUID workTaskId, String message) {
+        TaskSnapshot task = tasks.requireTask(workTaskId);
+        if (!"APPROVED".equals(task.status()) && !"ACKNOWLEDGED".equals(task.status())) {
             throw new BusinessException("WORK_INSIGHT_TASK_NOT_FINAL",
-                    "Insights can return work only after Team Lead approval", HttpStatus.CONFLICT);
+                    message, HttpStatus.CONFLICT);
         }
         return task;
     }
 
-    private EmployeeDirectory.EmployeeSummary employee(DepartmentWorkTask task) {
-        return employees.employeeSummary(task.getEmployeeId());
+    private EmployeeDirectory.EmployeeSummary employee(TaskSnapshot task) {
+        return employees.employeeSummary(task.employeeId());
     }
 
-    private WorkTaskAuditRecord newRecord(DepartmentWorkTask task, UUID hrUserId) {
+    private WorkTaskAuditRecord newRecord(TaskSnapshot task, UUID hrUserId) {
         EmployeeDirectory.EmployeeSummary employee = employee(task);
-        String teamLeadName = staff.findByUserId(task.getTeamLeadUserId())
+        String teamLeadName = staff.findByUserId(task.teamLeadUserId())
                 .map(StaffCommunicationDirectory.StaffMember::fullName).orElse("Former Team Lead");
-        return new WorkTaskAuditRecord(task.getId(), weekStart(task.getCreatedAt()), task.getDepartmentId(),
-                task.getDepartmentBranch(), task.getEmployeeId(), employee.employeeNumber(), employee.displayName(),
-                task.getTeamLeadUserId(), teamLeadName, task.getTitle(), task.getStatus().name(), hrUserId);
+        return new WorkTaskAuditRecord(task.id(), weekStart(task.createdAt()), task.departmentId(),
+                task.departmentBranch(), task.employeeId(), employee.employeeNumber(), employee.displayName(),
+                task.teamLeadUserId(), teamLeadName, task.title(), task.status(), hrUserId);
     }
 
     private void requireRole(UUID userId, String role, String message) {

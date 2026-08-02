@@ -14,6 +14,9 @@ public interface ManagerDirectory {
     void assignForOnboarding(UUID actorUserId, UUID departmentId, UUID managerUserId);
     void replaceForAccountClosure(UUID actorUserId, UUID closingManagerUserId,
                                   UUID replacementManagerUserId);
+    void endForRoleTransition(UUID actorUserId, UUID managerUserId);
+    void assignForRoleTransition(UUID actorUserId, UUID departmentId, UUID managerUserId,
+                                 UUID managerEmployeeId);
 
     record Assignment(UUID assignmentId, UUID departmentId, UUID managerUserId,
                       UUID managerEmployeeId, String fullName, String email) {}

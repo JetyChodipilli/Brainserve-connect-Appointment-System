@@ -2,7 +2,7 @@ package com.brainserve.appointment.audit.api;
 
 import com.brainserve.appointment.audit.domain.AuditEvent;
 import com.brainserve.appointment.audit.infrastructure.AuditEventRepository;
-import com.brainserve.appointment.realtime.application.WorkspaceChangeEvent;
+import com.brainserve.appointment.realtime.api.WorkspaceChangeEvent;
 import org.slf4j.MDC;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.core.Authentication;

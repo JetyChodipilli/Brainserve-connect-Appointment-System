@@ -7,6 +7,7 @@ import com.brainserve.appointment.organization.api.OrganizationDirectory;
 import com.brainserve.appointment.shared.application.BusinessException;
 import com.brainserve.appointment.teamlead.api.TeamLeadDirectory;
 import com.brainserve.appointment.departmenthr.api.DepartmentHrDirectory;
+import com.brainserve.appointment.worktask.api.WorkTaskDirectory;
 import com.brainserve.appointment.worktask.api.WorkTaskEvents;
 import com.brainserve.appointment.worktask.domain.DepartmentWorkTask;
 import com.brainserve.appointment.worktask.infrastructure.DepartmentWorkTaskRepository;
@@ -22,7 +23,7 @@ import java.util.Set;
 import java.util.UUID;
 
 @Service
-public class DepartmentWorkTaskService {
+public class DepartmentWorkTaskService implements WorkTaskDirectory {
     private static final String HR = "ROLE_HR_ADMIN";
     private static final String TEAM_LEAD = "ROLE_TEAM_LEAD";
     private static final String EMPLOYEE = "ROLE_EMPLOYEE";
@@ -88,6 +89,44 @@ public class DepartmentWorkTaskService {
                 "Only Employees, Team Leads and HR can view department work", HttpStatus.FORBIDDEN);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<TaskSnapshot> recentForDepartment(UUID departmentId) {
+        return tasks.findTop500ByDepartmentIdOrderByCreatedAtDesc(departmentId)
+                .stream()
+                .map(this::snapshot)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public TaskSnapshot requireTask(UUID workTaskId) {
+        return snapshot(require(workTaskId));
+    }
+
+    @Override
+    @Transactional
+    public TaskSnapshot requestInsightRework(
+            UUID workTaskId,
+            String reviewerRole,
+            String reason
+    ) {
+        DepartmentWorkTask task = require(workTaskId);
+        task.requestInsightRework(reviewerRole, reason);
+        return snapshot(task);
+    }
+
+    @Override
+    @Transactional
+    public TaskSnapshot assignInsightRework(
+            UUID workTaskId,
+            String guidance
+    ) {
+        DepartmentWorkTask task = require(workTaskId);
+        task.assignInsightRework(guidance);
+        return snapshot(task);
+    }
+
     @Transactional
     public DepartmentWorkTask start(UUID userId, UUID employeeId, UUID taskId, String update) {
         DepartmentWorkTask task = requireProgressScope(userId, employeeId, taskId);
@@ -145,11 +184,11 @@ public class DepartmentWorkTaskService {
         UUID departmentId = departmentHrs.requireForUser(hrUserId).departmentId();
         return tasks.performance().stream().filter(value -> value.getDepartmentId().equals(departmentId))
                 .map(value -> new Performance(value.getTeamLeadUserId(),
-                value.getDepartmentId(), value.getTotalTasks(), value.getCompletedTasks(),
-                value.getApprovedTasks(), value.getInProgressTasks(), value.getPendingReviewTasks(),
-                value.getOverdueTasks(), value.getTotalTasks() == 0 ? 0
+                        value.getDepartmentId(), value.getTotalTasks(), value.getCompletedTasks(),
+                        value.getApprovedTasks(), value.getInProgressTasks(), value.getPendingReviewTasks(),
+                        value.getOverdueTasks(), value.getTotalTasks() == 0 ? 0
                         : Math.round(value.getApprovedTasks() * 100.0 / value.getTotalTasks()),
-                value.getLastApprovedAt())).toList();
+                        value.getLastApprovedAt())).toList();
     }
 
     private DepartmentWorkTask requireProgressScope(UUID userId, UUID employeeId, UUID taskId) {
@@ -187,6 +226,19 @@ public class DepartmentWorkTaskService {
         return staff.activeByEmployeeId(task.getEmployeeId()).map(StaffCommunicationDirectory.StaffMember::userId)
                 .orElseThrow(() -> new BusinessException("WORK_TASK_EMPLOYEE_LOGIN_REQUIRED",
                         "The assigned Employee login is no longer active", HttpStatus.CONFLICT));
+    }
+
+    private TaskSnapshot snapshot(DepartmentWorkTask task) {
+        return new TaskSnapshot(
+                task.getId(),
+                task.getCreatedAt(),
+                task.getDepartmentId(),
+                task.getDepartmentBranch(),
+                task.getEmployeeId(),
+                task.getTeamLeadUserId(),
+                task.getTitle(),
+                task.getStatus().name()
+        );
     }
 
     private void notifyCounterpart(UUID actorUserId, UUID actorEmployeeId, DepartmentWorkTask task,

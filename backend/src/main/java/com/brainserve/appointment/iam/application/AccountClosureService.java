@@ -48,6 +48,7 @@ import java.time.ZoneId;
 import java.util.EnumSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -226,7 +227,7 @@ public class AccountClosureService implements AccountArchiveService {
                     HttpStatus.BAD_REQUEST);
         }
         if (departmentId != null) organization.requireActiveDepartment(departmentId);
-        String normalizedQuery = query == null || query.isBlank() ? null : query.trim();
+        String normalizedQuery = normalizeSearch(query);
         return users.findOperationalAccounts(AccountStatus.ACTIVE, normalizedQuery, role, departmentId, pageable)
                 .map(this::accountView);
     }
@@ -697,18 +698,24 @@ public class AccountClosureService implements AccountArchiveService {
     private List<UserAccount> candidateAccounts(SystemRole role, UserAccount target, UUID departmentId) {
         SystemRole candidateRole = role == SystemRole.ROLE_TEAM_LEAD ? SystemRole.ROLE_EMPLOYEE : role;
         UUID candidateDepartmentId = role == SystemRole.ROLE_TEAM_LEAD ? departmentId : null;
-        Page<UserAccount> page = users.findOperationalAccounts(AccountStatus.ACTIVE, null, candidateRole,
+        Page<UserAccount> page = users.findOperationalAccounts(AccountStatus.ACTIVE, "", candidateRole,
                 candidateDepartmentId, PageRequest.of(0, 100, Sort.by(Sort.Direction.ASC, "fullName")));
         return page.getContent().stream().filter(user -> !user.getId().equals(target.getId()))
                 .filter(user -> role == SystemRole.ROLE_TEAM_LEAD
                         ? user.getRoles().equals(Set.of(SystemRole.ROLE_EMPLOYEE)) && user.getEmployeeId() != null
-                            && employees.departmentIdForEmployee(user.getEmployeeId()).equals(departmentId)
+                          && employees.departmentIdForEmployee(user.getEmployeeId()).equals(departmentId)
                         : user.getRoles().contains(role))
                 .filter(user -> role != SystemRole.ROLE_HR_ADMIN
                         || departmentHrs.activeForUser(user.getId()).isEmpty())
                 .filter(user -> role != SystemRole.ROLE_MANAGER
                         || managers.activeForUser(user.getId()).isEmpty())
                 .toList();
+    }
+
+    private String normalizeSearch(String query) {
+        return query == null || query.isBlank()
+                ? ""
+                : query.trim().toLowerCase(Locale.ROOT);
     }
 
     private boolean canBusinessReview(UserAccount actor, AccountClosureRequest request) {
@@ -765,7 +772,7 @@ public class AccountClosureService implements AccountArchiveService {
                 : users.findById(request.getReplacementUserId()).orElse(null);
         String departmentName = request.getDepartmentId() == null ? null
                 : organization.findDepartment(request.getDepartmentId())
-                    .map(OrganizationDirectory.DepartmentSummary::name).orElse(null);
+                .map(OrganizationDirectory.DepartmentSummary::name).orElse(null);
         return new View(request.getId(), target.getId(), target.getFullName(), target.getEmail(),
                 request.getTargetRole(), target.getEmployeeId(), request.getDepartmentId(), departmentName,
                 request.getRequesterUserId(), request.getOrigin(), request.getReason(),
@@ -1129,7 +1136,7 @@ public class AccountClosureService implements AccountArchiveService {
                 : users.findById(challenge.replacementUserId()).orElse(null);
         String departmentName = challenge.departmentId() == null ? null
                 : organization.findDepartment(challenge.departmentId())
-                    .map(OrganizationDirectory.DepartmentSummary::name).orElse(null);
+                .map(OrganizationDirectory.DepartmentSummary::name).orElse(null);
         return new DirectArchiveChallengeView(challenge.challengeId(), target.getId(), target.getFullName(),
                 target.getEmail(), challenge.targetRole(), challenge.departmentId(), departmentName,
                 challenge.reason(), challenge.replacementUserId(),
@@ -1139,7 +1146,7 @@ public class AccountClosureService implements AccountArchiveService {
     }
 
     private ArchivedRecoveryChallengeView recoveryChallengeView(RecoveryChallenge challenge,
-                                                                 UserAccount target) {
+                                                                UserAccount target) {
         String previousDepartmentName = challenge.previousDepartmentId() == null ? null
                 : organization.findDepartment(challenge.previousDepartmentId())
                 .map(OrganizationDirectory.DepartmentSummary::name).orElse(null);

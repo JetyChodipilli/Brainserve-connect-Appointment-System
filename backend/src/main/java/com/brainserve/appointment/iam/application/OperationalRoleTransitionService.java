@@ -1,19 +1,16 @@
 package com.brainserve.appointment.iam.application;
 
 import com.brainserve.appointment.audit.api.AuditService;
-import com.brainserve.appointment.departmenthr.domain.DepartmentHrAssignment;
-import com.brainserve.appointment.departmenthr.infrastructure.DepartmentHrAssignmentRepository;
+import com.brainserve.appointment.departmenthr.api.DepartmentHrDirectory;
 import com.brainserve.appointment.employee.api.EmployeeDirectory;
 import com.brainserve.appointment.iam.domain.SystemRole;
 import com.brainserve.appointment.iam.domain.UserAccount;
 import com.brainserve.appointment.iam.infrastructure.RefreshTokenSessionRepository;
 import com.brainserve.appointment.iam.infrastructure.UserAccountRepository;
-import com.brainserve.appointment.manager.domain.DepartmentManagerAssignment;
-import com.brainserve.appointment.manager.infrastructure.DepartmentManagerAssignmentRepository;
+import com.brainserve.appointment.manager.api.ManagerDirectory;
 import com.brainserve.appointment.organization.api.OrganizationDirectory;
 import com.brainserve.appointment.shared.application.BusinessException;
-import com.brainserve.appointment.teamlead.domain.DepartmentTeamLeadAssignment;
-import com.brainserve.appointment.teamlead.infrastructure.DepartmentTeamLeadRepository;
+import com.brainserve.appointment.teamlead.api.TeamLeadDirectory;
 import org.springframework.http.HttpStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -22,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.EnumSet;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
@@ -41,18 +39,18 @@ public class OperationalRoleTransitionService {
     private final RefreshTokenSessionRepository sessions;
     private final EmployeeDirectory employees;
     private final OrganizationDirectory organization;
-    private final DepartmentTeamLeadRepository teamLeads;
-    private final DepartmentHrAssignmentRepository departmentHrs;
-    private final DepartmentManagerAssignmentRepository managers;
+    private final TeamLeadDirectory teamLeads;
+    private final DepartmentHrDirectory departmentHrs;
+    private final ManagerDirectory managers;
     private final AuditService audit;
 
     public OperationalRoleTransitionService(UserAccountRepository users,
                                             RefreshTokenSessionRepository sessions,
                                             EmployeeDirectory employees,
                                             OrganizationDirectory organization,
-                                            DepartmentTeamLeadRepository teamLeads,
-                                            DepartmentHrAssignmentRepository departmentHrs,
-                                            DepartmentManagerAssignmentRepository managers,
+                                            TeamLeadDirectory teamLeads,
+                                            DepartmentHrDirectory departmentHrs,
+                                            ManagerDirectory managers,
                                             AuditService audit) {
         this.users = users;
         this.sessions = sessions;
@@ -143,8 +141,8 @@ public class OperationalRoleTransitionService {
 
     @Transactional
     public SuccessionResult succeedChiefExecutive(UUID actorUserId, UUID currentCeoUserId,
-                                                   UUID successorUserId, UUID formerCeoDepartmentId,
-                                                   String reason) {
+                                                  UUID successorUserId, UUID formerCeoDepartmentId,
+                                                  String reason) {
         if (currentCeoUserId == null || successorUserId == null
                 || currentCeoUserId.equals(successorUserId)) {
             throw new BusinessException("CEO_SUCCESSOR_MUST_DIFFER",
@@ -249,7 +247,7 @@ public class OperationalRoleTransitionService {
 
     @Transactional
     public RecoveryResult recoverArchived(UUID actorUserId, UUID targetUserId, SystemRole targetRole,
-                                           UUID departmentId, String reason) {
+                                          UUID departmentId, String reason) {
         UserAccount actor = users.findByIdForUpdate(actorUserId).filter(UserAccount::isEnabled)
                 .orElseThrow(() -> forbidden("An active System Admin account is required"));
         if (!actor.getRoles().equals(Set.of(SystemRole.ROLE_SYSTEM_ADMIN))) {
@@ -301,7 +299,9 @@ public class OperationalRoleTransitionService {
                 && !actor.getRoles().equals(Set.of(SystemRole.ROLE_SYSTEM_ADMIN))) {
             throw forbidden("Only CEO or System Admin can view role-transition candidates");
         }
-        String normalized = query == null || query.isBlank() ? null : query.trim();
+        String normalized = query == null || query.isBlank()
+                ? ""
+                : query.trim().toLowerCase(Locale.ROOT);
         boolean includeFormerCeo = actor.getRoles().equals(Set.of(SystemRole.ROLE_SYSTEM_ADMIN));
         Page<UserAccount> page = users.findOperationalRoleTransitionCandidates(
                 com.brainserve.appointment.iam.domain.AccountStatus.ACTIVE,
@@ -310,7 +310,7 @@ public class OperationalRoleTransitionService {
         return page.map(account -> {
             if (account.getRoles().size() != 1
                     || (!OPERATIONAL_ROLES.containsAll(account.getRoles())
-                        && !account.getRoles().equals(Set.of(SystemRole.ROLE_CEO)))
+                    && !account.getRoles().equals(Set.of(SystemRole.ROLE_CEO)))
                     || account.getEmployeeId() == null) {
                 throw new IllegalStateException("The role-transition query returned an invalid account");
             }
@@ -322,32 +322,23 @@ public class OperationalRoleTransitionService {
 
     private void endPreviousAssignment(UUID actorUserId, UserAccount target, SystemRole role) {
         if (role == SystemRole.ROLE_TEAM_LEAD) {
-            teamLeads.findByTeamLeadUserIdAndActiveTrue(target.getId()).ifPresent(value -> {
-                value.end(actorUserId);
-                teamLeads.saveAndFlush(value);
-            });
+            teamLeads.endForRoleTransition(actorUserId, target.getId());
         } else if (role == SystemRole.ROLE_HR_ADMIN) {
-            departmentHrs.findByHrUserIdAndActiveTrue(target.getId()).ifPresent(value -> {
-                value.end(actorUserId);
-                departmentHrs.saveAndFlush(value);
-            });
+            departmentHrs.endForRoleTransition(actorUserId, target.getId());
         } else if (role == SystemRole.ROLE_MANAGER) {
-            managers.findByManagerUserIdAndActiveTrue(target.getId()).ifPresent(value -> {
-                value.end(actorUserId);
-                managers.saveAndFlush(value);
-            });
+            managers.endForRoleTransition(actorUserId, target.getId());
         }
     }
 
     private void requireTargetAssignmentAvailable(UUID targetUserId, SystemRole role, UUID departmentId) {
         if (departmentId == null) return;
         boolean occupied = switch (role) {
-            case ROLE_TEAM_LEAD -> teamLeads.findByDepartmentIdAndActiveTrue(departmentId)
-                    .filter(value -> !value.getTeamLeadUserId().equals(targetUserId)).isPresent();
-            case ROLE_HR_ADMIN -> departmentHrs.findByDepartmentIdAndActiveTrue(departmentId)
-                    .filter(value -> !value.getHrUserId().equals(targetUserId)).isPresent();
-            case ROLE_MANAGER -> managers.findByDepartmentIdAndActiveTrue(departmentId)
-                    .filter(value -> !value.getManagerUserId().equals(targetUserId)).isPresent();
+            case ROLE_TEAM_LEAD -> teamLeads.activeForDepartment(departmentId)
+                    .filter(value -> !value.teamLeadUserId().equals(targetUserId)).isPresent();
+            case ROLE_HR_ADMIN -> departmentHrs.activeForDepartment(departmentId)
+                    .filter(value -> !value.hrUserId().equals(targetUserId)).isPresent();
+            case ROLE_MANAGER -> managers.activeForDepartment(departmentId)
+                    .filter(value -> !value.managerUserId().equals(targetUserId)).isPresent();
             default -> false;
         };
         if (occupied) {
@@ -359,47 +350,38 @@ public class OperationalRoleTransitionService {
 
     private void endConflictingAssignments(UUID actorUserId, UserAccount target, SystemRole targetRole,
                                            UUID targetDepartmentId) {
-        teamLeads.findByTeamLeadUserIdAndActiveTrue(target.getId()).ifPresent(value -> {
+        teamLeads.activeForUser(target.getId()).ifPresent(value -> {
             if (targetRole != SystemRole.ROLE_TEAM_LEAD
-                    || !value.getDepartmentId().equals(targetDepartmentId)) {
-                value.end(actorUserId);
-                teamLeads.saveAndFlush(value);
+                    || !value.departmentId().equals(targetDepartmentId)) {
+                teamLeads.endForRoleTransition(actorUserId, target.getId());
             }
         });
-        departmentHrs.findByHrUserIdAndActiveTrue(target.getId()).ifPresent(value -> {
+        departmentHrs.activeForUser(target.getId()).ifPresent(value -> {
             if (targetRole != SystemRole.ROLE_HR_ADMIN
-                    || !value.getDepartmentId().equals(targetDepartmentId)) {
-                value.end(actorUserId);
-                departmentHrs.saveAndFlush(value);
+                    || !value.departmentId().equals(targetDepartmentId)) {
+                departmentHrs.endForRoleTransition(actorUserId, target.getId());
             }
         });
-        managers.findByManagerUserIdAndActiveTrue(target.getId()).ifPresent(value -> {
+        managers.activeForUser(target.getId()).ifPresent(value -> {
             if (targetRole != SystemRole.ROLE_MANAGER
-                    || !value.getDepartmentId().equals(targetDepartmentId)) {
-                value.end(actorUserId);
-                managers.saveAndFlush(value);
+                    || !value.departmentId().equals(targetDepartmentId)) {
+                managers.endForRoleTransition(actorUserId, target.getId());
             }
         });
     }
 
     private void createTargetAssignment(UUID actorUserId, UserAccount target, SystemRole role,
                                         UUID departmentId) {
-        if (departmentId == null) return;
+        if (departmentId == null || target.getEmployeeId() == null) return;
         if (role == SystemRole.ROLE_TEAM_LEAD) {
-            if (teamLeads.findByTeamLeadUserIdAndActiveTrue(target.getId())
-                    .filter(value -> value.getDepartmentId().equals(departmentId)).isPresent()) return;
-            teamLeads.saveAndFlush(new DepartmentTeamLeadAssignment(
-                    departmentId, target.getId(), target.getEmployeeId(), actorUserId));
+            teamLeads.assignForRoleTransition(
+                    actorUserId, departmentId, target.getId(), target.getEmployeeId());
         } else if (role == SystemRole.ROLE_HR_ADMIN) {
-            if (departmentHrs.findByHrUserIdAndActiveTrue(target.getId())
-                    .filter(value -> value.getDepartmentId().equals(departmentId)).isPresent()) return;
-            departmentHrs.saveAndFlush(new DepartmentHrAssignment(
-                    departmentId, target.getId(), target.getEmployeeId(), actorUserId));
+            departmentHrs.assignForRoleTransition(
+                    actorUserId, departmentId, target.getId(), target.getEmployeeId());
         } else if (role == SystemRole.ROLE_MANAGER) {
-            if (managers.findByManagerUserIdAndActiveTrue(target.getId())
-                    .filter(value -> value.getDepartmentId().equals(departmentId)).isPresent()) return;
-            managers.saveAndFlush(new DepartmentManagerAssignment(
-                    departmentId, target.getId(), target.getEmployeeId(), actorUserId));
+            managers.assignForRoleTransition(
+                    actorUserId, departmentId, target.getId(), target.getEmployeeId());
         }
     }
 

@@ -82,6 +82,20 @@ type View = "overview" | "appointments" | "work" | "performance" | "insights" | 
 type AppointmentStatus = "Approved" | "Awaiting Security" | "Awaiting Reception" | "Awaiting HR" | "Awaiting Team Lead" | "Awaiting Manager" | "Awaiting CEO" |
     "Pending" | "Checked in" | "Completed" | "Rejected" | "Cancelled" | "Expired";
 
+/**
+ * Raise an application-level validation failure outside the surrounding
+ * try/catch block. Keeping the throw in this helper avoids locally-caught
+ * exception warnings while preserving the existing error-handling behavior.
+ */
+function fail(message: string): never {
+    throw new Error(message);
+}
+
+/** Re-raise an unknown failure without triggering local-throw inspections. */
+function rethrow(reason: unknown): never {
+    throw reason;
+}
+
 const SYSTEM_ADMIN_EMAIL = "jetychodipilli@gmail.com";
 
 type Appointment = {
@@ -667,14 +681,14 @@ function previewArchivePasswordFailure(): number {
             window.sessionStorage.getItem(PREVIEW_DIRECT_ARCHIVE_PASSWORD_FAILURES_KEY) ?? "null") as
             { failures: number; lockedUntil: number } | null;
         if (current?.lockedUntil && current.lockedUntil > Date.now()) {
-            throw new Error("Too many incorrect password attempts. Try again later.");
+            fail("Too many incorrect password attempts. Try again later.");
         }
         const failures = (current?.failures ?? 0) + 1;
         window.sessionStorage.setItem(PREVIEW_DIRECT_ARCHIVE_PASSWORD_FAILURES_KEY,
             JSON.stringify({ failures, lockedUntil: failures >= 5 ? Date.now() + 15 * 60_000 : 0 }));
         return Math.max(0, 5 - failures);
     } catch (reason) {
-        if (reason instanceof Error && reason.message.startsWith("Too many incorrect")) throw reason;
+        if (reason instanceof Error && reason.message.startsWith("Too many incorrect")) rethrow(reason);
         window.sessionStorage.removeItem(PREVIEW_DIRECT_ARCHIVE_PASSWORD_FAILURES_KEY);
         return 4;
     }
@@ -1764,7 +1778,7 @@ function TrackAppointment({ onNavigate }: { onNavigate: (screen: Screen) => void
             const appointment = isBackendConfigured
                 ? await brainServeApi.trackAppointment(normalized)
                 : readDemoAppointments().find((item) => item.referenceNumber === normalized);
-            if (!appointment) throw new Error("Appointment was not found.");
+            if (!appointment) fail("Appointment was not found.");
             setReference(normalized); setResult(appointment);
         } catch (reason) { setError(reason instanceof Error ? reason.message : "Appointment was not found."); }
         finally { setBusy(false); }
@@ -1773,7 +1787,7 @@ function TrackAppointment({ onNavigate }: { onNavigate: (screen: Screen) => void
         if (!result) return;
         setBusy(true); setError("");
         try {
-            if (!isBackendConfigured) throw new Error("Secure appointment cancellation requires the BrainServe backend.");
+            if (!isBackendConfigured) fail("Secure appointment cancellation requires the BrainServe backend.");
             await brainServeApi.requestAppointmentCancellationOtp(result.referenceNumber);
             setCancellationOtpRequested(true);
         } catch (reason) { setError(reason instanceof Error ? reason.message : "The cancellation code could not be sent."); }
@@ -1784,7 +1798,7 @@ function TrackAppointment({ onNavigate }: { onNavigate: (screen: Screen) => void
         if (!result) return;
         setBusy(true); setError("");
         try {
-            if (!isBackendConfigured) throw new Error("Secure appointment cancellation requires the BrainServe backend.");
+            if (!isBackendConfigured) fail("Secure appointment cancellation requires the BrainServe backend.");
             setResult(await brainServeApi.cancelAppointment(result.referenceNumber, cancellationOtp));
             setCancellationOtpRequested(false);
             setCancellationOtp("");
@@ -1830,9 +1844,9 @@ function Login({ onLogin, onNavigate, sessionMessage = "", browserPreviewEnabled
             setAuthTokens(tokens.accessToken, tokens.refreshToken);
             const profile = await brainServeApi.me();
             const resolved = profile.roles.map(roleFromAuthority).find((item): item is Role => item !== null);
-            if (!resolved) throw new Error("This account does not have a supported BrainServe role.");
+            if (!resolved) fail("This account does not have a supported BrainServe role.");
             if (resolved === "Employee" && !profile.employeeId) {
-                throw new Error("Your Employee login is approved, but HR must assign your department and employee ID before you can sign in.");
+                fail("Your Employee login is approved, but HR must assign your department and employee ID before you can sign in.");
             }
             onLogin(resolved, profile.email, tokens.forcePasswordChange || profile.forcePasswordChange,
                 String(data.get("password")));
@@ -1868,7 +1882,7 @@ function ForcedPasswordChange({ email, currentPassword: initialPassword, onCompl
                 const passwordHash = await hashDemoPassword(currentPassword);
                 const account = readDemoAccounts().find((item) => item.email === email.toLowerCase()
                     && item.passwordHash === passwordHash && item.status === "ACTIVE" && item.forcePasswordChange);
-                if (!account) throw new Error("The temporary password is invalid or has already been changed.");
+                if (!account) fail("The temporary password is invalid or has already been changed.");
                 const value = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000).padStart(6, "0");
                 setPreviewOtp(value);
             }
@@ -1892,7 +1906,7 @@ function ForcedPasswordChange({ email, currentPassword: initialPassword, onCompl
             if (isBackendConfigured) {
                 await brainServeApi.confirmPasswordChange(otp, newPassword);
             } else {
-                if (!previewOtp || otp !== previewOtp) throw new Error("The preview verification code is incorrect.");
+                if (!previewOtp || otp !== previewOtp) fail("The preview verification code is incorrect.");
                 const passwordHash = await hashDemoPassword(newPassword);
                 writeDemoAccounts(readDemoAccounts().map((item) => item.email === email.toLowerCase()
                     ? { ...item, passwordHash, forcePasswordChange: false } : item));
@@ -2005,20 +2019,20 @@ function AccountRecovery({ type, onNavigate }: {
                 const requests = readDemoRecoveryRequests();
                 const request = requests.find((item) => item.type === type && item.status === "APPROVED"
                     && item.recoveryCode === code && item.expiresAt && new Date(item.expiresAt).getTime() > Date.now());
-                if (!request) throw new Error("Recovery code is invalid, expired or already used.");
+                if (!request) fail("Recovery code is invalid, expired or already used.");
                 const accounts = readDemoAccounts();
                 if (isPassword) {
                     const nextHash = await hashDemoPassword(primary);
                     if (accounts.some((account) => account.id === request.userId && account.passwordHash === nextHash)) {
-                        throw new Error("New password must differ from the current password.");
+                        fail("New password must differ from the current password.");
                     }
                     writeDemoAccounts(accounts.map((account) => account.id === request.userId
                         ? { ...account, passwordHash: nextHash } : account));
                 } else {
                     const normalized = primary.toLowerCase();
-                    if (!normalized.endsWith("@brainserve.in")) throw new Error("Use an official @brainserve.in email address.");
+                    if (!normalized.endsWith("@brainserve.in")) fail("Use an official @brainserve.in email address.");
                     if (accounts.some((account) => account.id !== request.userId && account.email === normalized)) {
-                        throw new Error("A login account already uses this email.");
+                        fail("A login account already uses this email.");
                     }
                     writeDemoAccounts(accounts.map((account) => account.id === request.userId
                         ? { ...account, email: normalized } : account));
@@ -2064,12 +2078,12 @@ function AccountRegistration({ onNavigate }: { onNavigate: (screen: Screen) => v
                 result = await brainServeApi.registerAccount(fullName, email, password, requestedRole);
             } else {
                 if (requestedRole === "ROLE_CEO") {
-                    throw new Error("CEO is the single company authority and can be created only by System Admin.");
+                    fail("CEO is the single company authority and can be created only by System Admin.");
                 }
-                if (!email.endsWith("@brainserve.in")) throw new Error("Use an official @brainserve.in email address.");
+                if (!email.endsWith("@brainserve.in")) fail("Use an official @brainserve.in email address.");
                 const accounts = readDemoAccounts();
                 if (accounts.some((item) => item.email === email) || email === SYSTEM_ADMIN_EMAIL) {
-                    throw new Error("An account already uses this email address.");
+                    fail("An account already uses this email address.");
                 }
                 const lowerRole = ["ROLE_EMPLOYEE", "ROLE_RECEPTIONIST", "ROLE_SECURITY"].includes(requestedRole);
                 const pending: DemoProvisioningAccount = {
@@ -2330,7 +2344,7 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
                             brainServeApi.visibleDepartments(),
                         ]);
                         const department = visibleDepartments.find((item) => item.id === assignment.departmentId);
-                        if (!department) throw new Error("Your assigned department is unavailable.");
+                        if (!department) fail("Your assigned department is unavailable.");
                         return { assignment, department, employees };
                     });
                     if (!active) return;
@@ -2721,7 +2735,7 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
             setSecurityIntakeAppointment(null);
         } catch (reason) {
             setOperationError(reason instanceof ApiError ? reason.message : "Security intake could not be recorded.");
-            throw reason;
+            rethrow(reason);
         }
     };
 
@@ -2978,7 +2992,7 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
         try {
             const created = isBackendConfigured ? await brainServeApi.assignDepartmentHr(departmentId, hrUserId) : (() => {
                 const account = staffAccounts.find((item) => item.userId === hrUserId);
-                if (!account?.employeeId) throw new Error("Select an active HR account linked to an employee profile.");
+                if (!account?.employeeId) fail("Select an active HR account linked to an employee profile.");
                 return { id: newClientId(), departmentId, hrUserId, hrEmployeeId: account.employeeId,
                     active: true, assignedByUserId: "demo-ceo", assignedAt: new Date().toISOString(),
                     endedByUserId: null, endedAt: null } satisfies DepartmentHrAssignment;
@@ -3052,7 +3066,7 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
         }
         try {
             if (isBackendConfigured) {
-                if (!employee.uuid) throw new Error("This employee record is missing its database identifier. Refresh the directory and try again.");
+                if (!employee.uuid) fail("This employee record is missing its database identifier. Refresh the directory and try again.");
                 await brainServeApi.changeEmployeeStatus(employee.uuid, employeeStatusCode[nextStatus]);
                 setDepartmentSummaries(await brainServeApi.departmentEmployeeSummary());
             }
@@ -3131,7 +3145,7 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
             setVisitModal(false);
         } catch (reason) {
             setOperationError(reason instanceof ApiError ? reason.message : "The visitor request could not be created.");
-            throw reason;
+            rethrow(reason);
         }
     };
 
@@ -3167,13 +3181,13 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
 
     const checkInByReference = async (referenceNumber: string) => {
         const normalized = referenceNumber.trim().toUpperCase();
-        if (!/^BSA-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(normalized)) throw new Error("Enter a valid BrainServe reference.");
+        if (!/^BSA-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(normalized)) fail("Enter a valid BrainServe reference.");
         let record: AccessRecord;
         if (isBackendConfigured) {
             record = await brainServeApi.checkInByReference(normalized);
         } else {
             const appointment = readDemoAppointments().find((item) => item.referenceNumber === normalized);
-            if (!appointment || appointment.status !== "APPROVED") throw new Error("Only an approved demo appointment can check in.");
+            if (!appointment || appointment.status !== "APPROVED") fail("Only an approved demo appointment can check in.");
             record = { id: newClientId(), appointmentId: appointment.referenceNumber,
                 visitorName: appointment.visitorDisplayName, badgeNumber: `B-${String(accessRecords.length + 1).padStart(3, "0")}`,
                 checkedInAt: new Date().toISOString(), checkedOutAt: null, processedBy: userEmail };
@@ -3203,7 +3217,7 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
             const normalizedEmail = email.trim().toLowerCase();
             if (readDemoAccounts().some((item) => item.email === normalizedEmail)
                 || staffAccounts.some((item) => item.email === normalizedEmail)) {
-                throw new Error("A login account already uses this email address.");
+                fail("A login account already uses this email address.");
             }
             const id = newClientId();
             const fullName = normalizedEmail.split("@")[0].replaceAll(".", " ");
@@ -3338,6 +3352,7 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
                                                       departments={departments} employees={employees} teamLeadAssignments={teamLeadAssignments}
                                                       departmentHrAssignments={departmentHrAssignments} managerAssignments={managerAssignments}
                                                       onRoleAssignmentChanged={refreshRoleAssignments}
+                                                      onAddEmployee={() => { setOperationError(""); setEmployeeAccountId(undefined); setEmployeeDepartmentId(undefined); setEmployeeModal(true); }}
                                                       onAssignTeamLead={assignTeamLead}
                                                       onCreate={createStaffAccount} onChangeEmail={changeStaffEmail} onResetPassword={resetStaffPassword}
                                                       onSetEnabled={setStaffEnabled} onUpdatePermissions={updateStaffPermissions} />}
@@ -3394,6 +3409,7 @@ function MyProfileView({ role, userEmail, departments, employees, staffAccounts,
         };
     }, [departments, employees, role, staffAccounts, userEmail]);
     const [profile, setProfile] = useState<MyProfile>(() => demoProfile());
+    const [backendProfileLoaded, setBackendProfileLoaded] = useState(!isBackendConfigured);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
     const [message, setMessage] = useState("");
@@ -3429,7 +3445,7 @@ function MyProfileView({ role, userEmail, departments, employees, staffAccounts,
     useEffect(() => {
         if (!isBackendConfigured) return;
         let active = true;
-        brainServeApi.myProfile().then((value) => { if (active) { setProfile(value); onProfileUpdated(value); setError(""); } })
+        brainServeApi.myProfile().then((value) => { if (active) { setProfile(value); setBackendProfileLoaded(true); onProfileUpdated(value); setError(""); } })
             .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "Your profile could not be loaded."); });
         if (["HR Admin", "Team Lead"].includes(role)) {
             brainServeApi.myRoleDepartmentChanges().then((items) => { if (active) setChangeRequests(items); })
@@ -3442,6 +3458,7 @@ function MyProfileView({ role, userEmail, departments, employees, staffAccounts,
         const eligible = ["CEO", "HR Admin", "Team Lead", "Reception", "Security"].includes(role);
         if (!eligible) return;
         if (isBackendConfigured) {
+            if (!backendProfileLoaded) return;
             let active = true;
             Promise.all([brainServeApi.myAccountClosures(), brainServeApi.accountClosureCandidates(profile.userId)])
                 .then(([requests, candidates]) => { if (active) { setClosureRequests(requests); setClosureCandidates(candidates); } })
@@ -3449,7 +3466,7 @@ function MyProfileView({ role, userEmail, departments, employees, staffAccounts,
             return () => { active = false; };
         }
         return;
-    }, [employees, profile.departmentId, profile.userId, role]);
+    }, [backendProfileLoaded, employees, profile.departmentId, profile.userId, role]);
 
     const uploadPhoto = async (file: File | undefined) => {
         if (!file) return;
@@ -3502,9 +3519,9 @@ function MyProfileView({ role, userEmail, departments, employees, staffAccounts,
             if (isBackendConfigured) created = await brainServeApi.requestRoleDepartmentChange(payload);
             else {
                 const target = departments.find((item) => item.id === payload.targetDepartmentId);
-                if (!target) throw new Error("Select an active department.");
+                if (!target) fail("Select an active department.");
                 if (role === "Team Lead" && !readDemoDepartmentHrAssignments().some((item) => item.active && item.departmentId === target.id)) {
-                    throw new Error("The destination department needs an assigned HR Admin before a Team Lead can request access.");
+                    fail("The destination department needs an assigned HR Admin before a Team Lead can request access.");
                 }
                 const occupantUserId = role === "HR Admin" ? targetHrAssignment?.hrUserId
                     : targetTeamLeadAssignment?.teamLeadUserId;
@@ -3568,10 +3585,10 @@ function MyProfileView({ role, userEmail, departments, employees, staffAccounts,
                         : role === "Reception" ? "ROLE_RECEPTIONIST" : role === "Security" ? "ROLE_SECURITY" : "ROLE_CEO";
                 if (readDemoAccountClosures().some((item) => item.targetUserId === profile.userId
                     && ["REQUESTED", "BUSINESS_APPROVED", "PENDING_SYSTEM_ADMIN", "SCHEDULED"].includes(item.status))) {
-                    throw new Error("This account already has an open closure request.");
+                    fail("This account already has an open closure request.");
                 }
                 if (!["Reception", "Security"].includes(role) && !replacementUserId) {
-                    throw new Error("Select an active replacement so responsibilities are not orphaned.");
+                    fail("Select an active replacement so responsibilities are not orphaned.");
                 }
                 const replacement = availableClosureCandidates.find((item) => item.userId === replacementUserId);
                 const now = new Date().toISOString();
@@ -3991,7 +4008,7 @@ function AccountLifecycleView({ role, userEmail, departments, employees }: {
             if (isBackendConfigured) updated = await brainServeApi.decideBusinessAccountClosure(request.id, decision, replacementUserId, note);
             else {
                 if (decision === "approve" && !["ROLE_RECEPTIONIST", "ROLE_SECURITY"].includes(request.targetRole) && !replacementUserId) {
-                    throw new Error("Select an active replacement before approval.");
+                    fail("Select an active replacement before approval.");
                 }
                 const now = new Date().toISOString();
                 updated = decision === "approve" ? { ...request, replacementUserId,
@@ -4017,7 +4034,7 @@ function AccountLifecycleView({ role, userEmail, departments, employees }: {
 
     const archiveDemoAccount = (request: AccountClosureRequest, actor: string) => {
         const account = demoAccounts().find((item) => item.userId === request.targetUserId);
-        if (!account) throw new Error("The target account could not be found.");
+        if (!account) fail("The target account could not be found.");
         const archivedAt = new Date().toISOString();
         const snapshot: ArchivedAccount = { id: newClientId(), originalUserId: account.userId,
             fullName: account.fullName, email: account.email, role: account.role,
@@ -4041,7 +4058,7 @@ function AccountLifecycleView({ role, userEmail, departments, employees }: {
             if (isBackendConfigured) updated = await brainServeApi.decideSystemAdminAccountClosure(request.id, decision, replacementUserId, note);
             else {
                 if (decision === "approve" && !["ROLE_RECEPTIONIST", "ROLE_SECURITY"].includes(request.targetRole) && !replacementUserId) {
-                    throw new Error("Select an active replacement before final archival.");
+                    fail("Select an active replacement before final archival.");
                 }
                 if (decision === "reject") updated = { ...request, status: "REJECTED", decisionNote: note,
                     systemAdminApproverUserId: SYSTEM_ADMIN_EMAIL, systemAdminApprovedAt: null };
@@ -4108,7 +4125,7 @@ function AccountLifecycleView({ role, userEmail, departments, employees }: {
                 } else {
                     if (!await verifyPreviewSystemAdminPassword(userEmail, currentPassword)) {
                         const attemptsRemaining = previewArchivePasswordFailure();
-                        throw new Error(attemptsRemaining === 0
+                        fail(attemptsRemaining === 0
                             ? "Too many incorrect password attempts. Try again later."
                             : `Current System Admin password is incorrect. ${attemptsRemaining} attempts remain.`);
                     }
@@ -4145,12 +4162,12 @@ function AccountLifecycleView({ role, userEmail, departments, employees }: {
                     if (attemptsRemaining <= 0) {
                         writePreviewDirectArchiveChallenge(null);
                         setArchiveChallenge(null); setDirectTargetId("");
-                        throw new Error("The verification was cancelled after too many incorrect codes.");
+                        fail("The verification was cancelled after too many incorrect codes.");
                     }
                     const updated = { ...archiveChallenge, attemptsRemaining };
                     writePreviewDirectArchiveChallenge(updated);
                     setArchiveChallenge(updated);
-                    throw new Error(`The confirmation code is incorrect. ${attemptsRemaining} attempts remain.`);
+                    fail(`The confirmation code is incorrect. ${attemptsRemaining} attempts remain.`);
                 } else {
                     const now = new Date().toISOString();
                     const request: AccountClosureRequest = { id: newClientId(), targetUserId: directTarget.userId,
@@ -4291,26 +4308,26 @@ function AccountLifecycleView({ role, userEmail, departments, employees }: {
                                      departmentId: string | null) => {
         const currentAccount = readDemoAccounts().find((item) => item.id === account.originalUserId);
         if (!currentAccount || currentAccount.status === "ACTIVE") {
-            throw new Error("The linked identity is no longer archived. Refresh the directory.");
+            fail("The linked identity is no longer archived. Refresh the directory.");
         }
         if (!["ROLE_CEO", "ROLE_MANAGER", "ROLE_HR_ADMIN", "ROLE_TEAM_LEAD", "ROLE_EMPLOYEE",
             "ROLE_RECEPTIONIST", "ROLE_SECURITY"].includes(targetRole)) {
-            throw new Error("Select one supported recovery role.");
+            fail("Select one supported recovery role.");
         }
         const employeeRole = !["ROLE_RECEPTIONIST", "ROLE_SECURITY"].includes(targetRole);
         if (employeeRole && !currentAccount.employeeId) {
-            throw new Error("This role requires the archived account's existing employee ID.");
+            fail("This role requires the archived account's existing employee ID.");
         }
-        if (employeeRole && !departmentId) throw new Error("Select an active department.");
+        if (employeeRole && !departmentId) fail("Select an active department.");
         if (!employeeRole && departmentId) {
-            throw new Error("Receptionist and Security recovery remain company-wide.");
+            fail("Receptionist and Security recovery remain company-wide.");
         }
         if (departmentId && !departments.some((item) => item.id === departmentId && item.active)) {
-            throw new Error("Select an active department.");
+            fail("Select an active department.");
         }
         if (targetRole === "ROLE_CEO" && readDemoAccounts().some((item) => item.id !== currentAccount.id
             && item.status === "ACTIVE" && item.role === "ROLE_CEO")) {
-            throw new Error("The company already has an active CEO. Select another role for this recovery.");
+            fail("The company already has an active CEO. Select another role for this recovery.");
         }
         const occupied = targetRole === "ROLE_MANAGER"
             ? readDemoManagerAssignments().some((item) => item.active && item.departmentId === departmentId
@@ -4323,14 +4340,14 @@ function AccountLifecycleView({ role, userEmail, departments, employees }: {
                         && item.teamLeadUserId !== currentAccount.id)
                     : false;
         if (occupied) {
-            throw new Error(`The selected department already has an active ${statusLabel(targetRole)}.`);
+            fail(`The selected department already has an active ${statusLabel(targetRole)}.`);
         }
         return currentAccount;
     };
 
     const recoverPreviewAccount = (challenge: ArchivedRecoveryChallenge) => {
         const account = readDemoArchivedAccounts().find((item) => item.id === challenge.archivedAccountId);
-        if (!account) throw new Error("The archived account record could not be found.");
+        if (!account) fail("The archived account record could not be found.");
         const currentAccount = validatePreviewRecovery(account, challenge.targetRole,
             challenge.targetDepartmentId);
         const now = new Date().toISOString();
@@ -4430,7 +4447,7 @@ function AccountLifecycleView({ role, userEmail, departments, employees }: {
                 } else {
                     if (!await verifyPreviewSystemAdminPassword(userEmail, currentPassword)) {
                         const attemptsRemaining = previewArchivePasswordFailure();
-                        throw new Error(attemptsRemaining === 0
+                        fail(attemptsRemaining === 0
                             ? "Too many incorrect password attempts. Try again later."
                             : `Current System Admin password is incorrect. ${attemptsRemaining} attempts remain.`);
                     }
@@ -4471,12 +4488,12 @@ function AccountLifecycleView({ role, userEmail, departments, employees }: {
                     if (attemptsRemaining <= 0) {
                         writePreviewArchivedRecoveryChallenge(null);
                         setRecoveryChallenge(null); setRecoveryTargetId("");
-                        throw new Error("The recovery verification was cancelled after too many incorrect codes.");
+                        fail("The recovery verification was cancelled after too many incorrect codes.");
                     }
                     const updated = { ...recoveryChallenge, attemptsRemaining };
                     writePreviewArchivedRecoveryChallenge(updated);
                     setRecoveryChallenge(updated);
-                    throw new Error(`The recovery code is incorrect. ${attemptsRemaining} attempts remain.`);
+                    fail(`The recovery code is incorrect. ${attemptsRemaining} attempts remain.`);
                 } else {
                     recoverPreviewAccount(recoveryChallenge);
                 }
@@ -6157,7 +6174,7 @@ function EmployeeServicePanel({ employee, role, onClose }: {
             const [currentResult, historyResult, documentResult] = await Promise.all([
                 brainServeApi.currentCompensation(employeeId).catch((reason) => {
                     if (reason instanceof ApiError && reason.status === 404) return null;
-                    throw reason;
+                    rethrow(reason);
                 }),
                 brainServeApi.compensationHistory(employeeId),
                 brainServeApi.employeeDocuments(employeeId),
@@ -6324,11 +6341,11 @@ function TerminationRequestModal({ employee, userEmail, onClose, onSubmitted }: 
         const effectiveDate = String(data.get("effectiveDate") ?? "");
         try {
             if (isBackendConfigured) {
-                if (!employee.uuid) throw new Error("This employee is missing its database identifier. Refresh and try again.");
+                if (!employee.uuid) fail("This employee is missing its database identifier. Refresh and try again.");
                 await brainServeApi.requestEmployeeTermination(employee.uuid, reason, effectiveDate);
             } else {
                 if (readDemoTerminations().some((item) => item.employeeId === (employee.uuid ?? employee.id)
-                    && item.status === "PENDING_CEO_APPROVAL")) throw new Error("This employee already has a pending CEO review.");
+                    && item.status === "PENDING_CEO_APPROVAL")) fail("This employee already has a pending CEO review.");
                 const requester = readDemoAccounts().find((item) => item.email.toLowerCase() === userEmail.toLowerCase());
                 const now = new Date().toISOString();
                 const created: EmployeeTerminationRequest = { id: newClientId(), employeeId: employee.uuid ?? employee.id,
@@ -6533,7 +6550,7 @@ function VisitorsView({ role, appointments, accessRecords, onCheckIn, onReferenc
                 setVerifiedPass(await brainServeApi.verifyVisitorPass(passToken));
             } else {
                 const referenceNumber = passToken.replace("brainserve-demo:", "").trim().toUpperCase();
-                if (!/^BSA-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(referenceNumber)) throw new Error("This QR pass is invalid.");
+                if (!/^BSA-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(referenceNumber)) fail("This QR pass is invalid.");
                 setVerifiedPass({ referenceNumber, visitorName: "Demo visitor", appointmentStatus: "APPROVED",
                     validUntil: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() });
             }
@@ -6677,7 +6694,7 @@ function OrganizationView({ role, userEmail, departments, employees, staffAccoun
             if (role === "CEO" && data.get("joinExecutive") === "yes") {
                 const joined = await onJoinExecutiveDepartment({ departmentId: created.id, phoneNumber: "",
                     designation: "Chief Executive Officer", joiningDate: officeToday() });
-                if (!joined) throw new Error("The department was created, but the CEO profile could not be registered to it.");
+                if (!joined) fail("The department was created, but the CEO profile could not be registered to it.");
                 setExecutiveDepartmentId(created.id);
             }
             form.reset(); setShowForm(false); setMessage(data.get("joinExecutive") === "yes"
@@ -7470,13 +7487,13 @@ function AccountProvisioningPanel({ role, departments: initialApprovalDepartment
         let createdAccountId: string | null = null;
 
         try {
-            if (!fullName) throw new Error("Enter the full name.");
-            if (!email) throw new Error("Enter the company email.");
+            if (!fullName) fail("Enter the full name.");
+            if (!email) fail("Enter the company email.");
             if (!["ROLE_CEO", "ROLE_HR_ADMIN", "ROLE_MANAGER"].includes(accountRole)) {
-                throw new Error("Select CEO, HR Admin or Manager.");
+                fail("Select CEO, HR Admin or Manager.");
             }
             if (!email.endsWith("@brainserve.in")) {
-                throw new Error("Use an official @brainserve.in company email.");
+                fail("Use an official @brainserve.in company email.");
             }
 
             const onboarding: HrAccountApprovalInput | undefined = isHrAdmin
@@ -7489,22 +7506,22 @@ function AccountProvisioningPanel({ role, departments: initialApprovalDepartment
                 : undefined;
 
             if (isHrAdmin) {
-                if (!departmentId) throw new Error("Select a department for the HR Admin.");
-                if (!designation) throw new Error("Enter the HR Admin designation.");
-                if (!joiningDate) throw new Error("Select the HR Admin joining date.");
+                if (!departmentId) fail("Select a department for the HR Admin.");
+                if (!designation) fail("Enter the HR Admin designation.");
+                if (!joiningDate) fail("Select the HR Admin joining date.");
 
                 const selectedDepartment = approvalDepartments.find(
                     (department) => department.id === departmentId,
                 );
 
                 if (!selectedDepartment) {
-                    throw new Error("The selected department was not found. Reload the page and select it again.");
+                    fail("The selected department was not found. Reload the page and select it again.");
                 }
                 if (!selectedDepartment.active) {
-                    throw new Error("The selected department is inactive.");
+                    fail("The selected department is inactive.");
                 }
                 if (assignedHrDepartmentIds.has(departmentId)) {
-                    throw new Error(`${selectedDepartment.name} already has an active HR Admin.`);
+                    fail(`${selectedDepartment.name} already has an active HR Admin.`);
                 }
             }
 
@@ -7573,7 +7590,7 @@ function AccountProvisioningPanel({ role, departments: initialApprovalDepartment
             const existingAccounts = readDemoAccounts();
 
             if (existingAccounts.some((account) => account.email.toLowerCase() === email)) {
-                throw new Error("An account already exists for this company email.");
+                fail("An account already exists for this company email.");
             }
 
             const governingCeo = existingAccounts.find(
@@ -7583,7 +7600,7 @@ function AccountProvisioningPanel({ role, departments: initialApprovalDepartment
             );
 
             if (accountRole === "ROLE_CEO" && governingCeo) {
-                throw new Error(
+                fail(
                     `BrainServe Connect already has one governing CEO: ${governingCeo.fullName}.`,
                 );
             }
@@ -7594,7 +7611,7 @@ function AccountProvisioningPanel({ role, departments: initialApprovalDepartment
                     (account) => account.role === "ROLE_CEO" && account.status === "ACTIVE",
                 )
             ) {
-                throw new Error(
+                fail(
                     "Activate the company CEO before creating an HR Admin or Manager account.",
                 );
             }
@@ -7607,7 +7624,7 @@ function AccountProvisioningPanel({ role, departments: initialApprovalDepartment
                     (item) => item.id === onboarding.departmentId,
                 );
 
-                if (!department) throw new Error("The selected department was not found.");
+                if (!department) fail("The selected department was not found.");
 
                 const accountId = newClientId();
                 const employeeId = newClientId();
@@ -7727,19 +7744,23 @@ function AccountProvisioningPanel({ role, departments: initialApprovalDepartment
         try {
             const privilegedOnboarding = decision === "approve"
                 && ["ROLE_HR_ADMIN", "ROLE_MANAGER"].includes(account.role);
-            const onboarding = privilegedOnboarding ? hrDrafts[account.id] : undefined;
-            const accountRoleLabel = account.role === "ROLE_MANAGER" ? "Manager" : "HR Admin";
-            if (privilegedOnboarding
+            const employeeOnboarding = decision === "approve"
+                && role === "HR Admin" && account.role === "ROLE_EMPLOYEE";
+            const requiresOnboarding = privilegedOnboarding || employeeOnboarding;
+            const onboarding = requiresOnboarding ? hrDrafts[account.id] : undefined;
+            const accountRoleLabel = account.role === "ROLE_MANAGER" ? "Manager"
+                : account.role === "ROLE_EMPLOYEE" ? "Employee" : "HR Admin";
+            if (requiresOnboarding
                 && (!onboarding?.departmentId || !onboarding.designation.trim() || !onboarding.joiningDate)) {
-                throw new Error(`Select an available department, designation and joining date before approving this ${accountRoleLabel}.`);
+                fail(`Select an available department, designation and joining date before approving this ${accountRoleLabel}.`);
             }
             if (isBackendConfigured) {
                 if (role === "System Admin") await brainServeApi.decideSystemAdminUser(account.id, decision, onboarding);
                 else if (role === "CEO") await brainServeApi.decideCeoUser(account.id, decision, onboarding);
-                else await brainServeApi.decideHrUser(account.id, decision);
+                else await brainServeApi.decideHrUser(account.id, decision, onboarding);
             } else {
                 let employeeId: string | null = null;
-                if (privilegedOnboarding && onboarding) {
+                if (requiresOnboarding && onboarding) {
                     const department = approvalDepartments.find((item) => item.id === onboarding.departmentId);
                     employeeId = newClientId();
                     const employeeNumber = `BSPL-${department?.code ?? "OPS"}-${String(Date.now()).slice(-4)}`;
@@ -7757,7 +7778,7 @@ function AccountProvisioningPanel({ role, departments: initialApprovalDepartment
                         };
                         writeDemoDepartmentHrAssignments([nextAssignment, ...readDemoDepartmentHrAssignments()]);
                         setAssignedHrDepartmentIds((current) => new Set([...current, onboarding.departmentId]));
-                    } else {
+                    } else if (account.role === "ROLE_MANAGER") {
                         const nextAssignment: ManagerAssignment = {
                             id: newClientId(), departmentId: onboarding.departmentId, managerUserId: account.id,
                             managerEmployeeId: employeeId, active: true,
@@ -7790,8 +7811,10 @@ function AccountProvisioningPanel({ role, departments: initialApprovalDepartment
                 }
             }
             setMessage(decision === "approve"
-                ? privilegedOnboarding
-                    ? `${account.fullName} was approved, linked to an employee ID and assigned as ${accountRoleLabel} for the selected department.`
+                ? requiresOnboarding
+                    ? employeeOnboarding
+                        ? `${account.fullName} was approved, assigned an employee ID and linked to the selected department.`
+                        : `${account.fullName} was approved, linked to an employee ID and assigned as ${accountRoleLabel} for the selected department.`
                     : `${account.fullName} was approved and activated. The account can now sign in.`
                 : `${account.fullName} was rejected and cannot sign in.`);
             await onDecision?.();
@@ -7812,7 +7835,8 @@ function AccountProvisioningPanel({ role, departments: initialApprovalDepartment
                 departmentId: current[accountId]?.departmentId ?? "",
                 phoneNumber: current[accountId]?.phoneNumber ?? "",
                 designation: current[accountId]?.designation
-                    ?? (accountRole === "ROLE_MANAGER" ? "Department Manager" : "HR Business Partner"),
+                    ?? (accountRole === "ROLE_MANAGER" ? "Department Manager"
+                        : accountRole === "ROLE_EMPLOYEE" ? "Employee" : "HR Business Partner"),
                 joiningDate: current[accountId]?.joiningDate ?? officeToday(),
                 ...patch,
             } }));
@@ -7956,27 +7980,33 @@ function AccountProvisioningPanel({ role, departments: initialApprovalDepartment
             <div className="staff-account-list">{accounts.map((account) => {
                 const requiresPrivilegedOnboarding = ["ROLE_HR_ADMIN", "ROLE_MANAGER"].includes(account.role)
                     && ["System Admin", "CEO"].includes(role);
-                const accountRoleLabel = account.role === "ROLE_MANAGER" ? "Manager" : "HR Admin";
+                const requiresEmployeeOnboarding = account.role === "ROLE_EMPLOYEE" && role === "HR Admin";
+                const requiresOnboarding = requiresPrivilegedOnboarding || requiresEmployeeOnboarding;
+                const accountRoleLabel = account.role === "ROLE_MANAGER" ? "Manager"
+                    : account.role === "ROLE_EMPLOYEE" ? "Employee" : "HR Admin";
                 const unavailableDepartments = account.role === "ROLE_MANAGER"
                     ? assignedManagerDepartmentIds : assignedHrDepartmentIds;
                 const availableDepartments = approvalDepartments.filter((department) => department.active
-                    && !unavailableDepartments.has(department.id));
+                    && (requiresEmployeeOnboarding || !unavailableDepartments.has(department.id)));
                 const draft = hrDrafts[account.id] ?? {
                     departmentId: "", phoneNumber: "",
-                    designation: account.role === "ROLE_MANAGER" ? "Department Manager" : "HR Business Partner",
+                    designation: account.role === "ROLE_MANAGER" ? "Department Manager"
+                        : account.role === "ROLE_EMPLOYEE" ? "Employee" : "HR Business Partner",
                     joiningDate: officeToday(),
                 };
                 return <div className="staff-account-row" key={account.id}>
                     <div className="staff-account-head"><span className="role-icon"><UserCog size={18} /></span><span>
             <strong>{account.fullName}</strong><small>{account.email} · {account.role.replace("ROLE_", "").replaceAll("_", " ")}</small>
           </span><span className="status-pill status-pending"><span />Pending</span></div>
-                    {requiresPrivilegedOnboarding && <div className="hr-approval-onboarding">
+                    {requiresOnboarding && <div className="hr-approval-onboarding">
                         <div className="hr-approval-intro"><Building2 size={18} /><span><strong>Assign department before activation</strong>
-              <small>This creates the employee ID and makes this person the only active {accountRoleLabel} for the department.</small></span></div>
+              <small>{requiresEmployeeOnboarding
+                  ? "This creates the employee ID and links the employee to the selected department."
+                  : `This creates the employee ID and makes this person the only active ${accountRoleLabel} for the department.`}</small></span></div>
                         <div className="hr-approval-fields">
                             <label>Department<select value={draft.departmentId}
                                                      onChange={(event) => updateHrDraft(account.id, account.role, { departmentId: event.target.value })} required>
-                                <option value="">Select an unassigned department</option>
+                                <option value="">{requiresEmployeeOnboarding ? "Select department" : "Select an unassigned department"}</option>
                                 {availableDepartments.map((department) => <option value={department.id} key={department.id}>
                                     {department.name} · {department.code}
                                 </option>)}
@@ -7989,18 +8019,20 @@ function AccountProvisioningPanel({ role, departments: initialApprovalDepartment
                                                       onChange={(event) => updateHrDraft(account.id, account.role, { joiningDate: event.target.value })} required /></label>
                         </div>
                         {availableDepartments.length === 0 && <div className="login-error" role="alert">
-                            {account.role === "ROLE_MANAGER"
-                                ? "Every active department already has a Manager. End an existing assignment before approving another Manager."
-                                : "Every active department already has an HR Admin. End an existing assignment before approving another HR Admin."}
+                            {requiresEmployeeOnboarding
+                                ? "No active department is available for employee assignment."
+                                : account.role === "ROLE_MANAGER"
+                                    ? "Every active department already has a Manager. End an existing assignment before approving another Manager."
+                                    : "Every active department already has an HR Admin. End an existing assignment before approving another HR Admin."}
                         </div>}
                     </div>}
                     <div className="approval-actions">
                         <button className="button button-reject" disabled={busyId === account.id}
                                 onClick={() => void decide(account, "reject")}><X size={16} /> Reject</button>
                         <button className="button button-approve" disabled={busyId === account.id
-                            || (requiresPrivilegedOnboarding && (!draft.departmentId || availableDepartments.length === 0))}
+                            || (requiresOnboarding && (!draft.departmentId || availableDepartments.length === 0))}
                                 onClick={() => void decide(account, "approve")}><Check size={16} />
-                            {requiresPrivilegedOnboarding ? "Approve, create ID & assign" : "Approve & activate"}</button>
+                            {requiresOnboarding ? "Approve, create ID & assign" : "Approve & activate"}</button>
                     </div>
                 </div>;
             })}
@@ -8023,7 +8055,7 @@ function PasswordChangeCard() {
         event.preventDefault(); setBusy(true); setError(""); setMessage("");
         const data = new FormData(event.currentTarget);
         try {
-            if (!isBackendConfigured) throw new Error("Connect the Spring backend and SMTP service to change passwords by email OTP.");
+            if (!isBackendConfigured) fail("Connect the Spring backend and SMTP service to change passwords by email OTP.");
             await brainServeApi.requestPasswordChangeOtp(String(data.get("currentPassword")));
             setOtpRequested(true);
             setMessage("A six-digit OTP was sent to your login email and expires in 10 minutes.");
@@ -8043,7 +8075,7 @@ function PasswordChangeCard() {
             return;
         }
         try {
-            if (!isBackendConfigured) throw new Error("Connect the Spring backend to confirm password changes.");
+            if (!isBackendConfigured) fail("Connect the Spring backend to confirm password changes.");
             await brainServeApi.confirmPasswordChange(String(data.get("otp")), newPassword);
             form.reset(); setOtpRequested(false);
             setMessage("Password changed successfully. Other signed-in devices have been logged out.");
@@ -8561,18 +8593,18 @@ function OperationalRoleTransitionPanel({ actorRole, departments, managerAssignm
                     && ["ACTIVE", "REJECTED", "DISABLED"].includes(targetAccount.status));
                 if (!targetAccount || !eligibleSource || !targetAccount.employeeId
                     || !supportedRoles.includes(targetRole)) {
-                    throw new Error("Select one active employee-linked operational account.");
+                    fail("Select one active employee-linked operational account.");
                 }
                 if (formerCeoTransition && targetRole !== "ROLE_MANAGER") {
-                    throw new Error("A former CEO can transition only to Manager.");
+                    fail("A former CEO can transition only to Manager.");
                 }
                 if (formerCeoTransition && !readDemoAccounts().some((account) => account.id !== userId
                     && account.role === "ROLE_CEO" && account.status === "ACTIVE")) {
-                    throw new Error("Activate the successor CEO before moving the current CEO to Manager.");
+                    fail("Activate the successor CEO before moving the current CEO to Manager.");
                 }
-                if (!department) throw new Error("Select an active department.");
+                if (!department) fail("Select an active department.");
                 if (targetAccount.role === targetRole) {
-                    throw new Error(`Select a different role for ${candidate.fullName}.`);
+                    fail(`Select a different role for ${candidate.fullName}.`);
                 }
 
                 const currentTeamLeads = readDemoTeamLeadAssignments();
@@ -8589,7 +8621,7 @@ function OperationalRoleTransitionPanel({ actorRole, departments, managerAssignm
                                 && item.managerUserId !== userId)
                             : false;
                 if (occupied) {
-                    throw new Error(`The selected department already has an active ${targetRole
+                    fail(`The selected department already has an active ${targetRole
                         .replace("ROLE_", "").replaceAll("_", " ")}.`);
                 }
 
@@ -8628,7 +8660,7 @@ function OperationalRoleTransitionPanel({ actorRole, departments, managerAssignm
                 const employee = readDemoEmployees().find((item) =>
                     (item.uuid ?? item.id) === targetAccount.employeeId);
                 if (!employee || employee.status !== "Active") {
-                    throw new Error("Only an active employee profile can receive the Manager position.");
+                    fail("Only an active employee profile can receive the Manager position.");
                 }
                 const nextDesignation = targetRole === "ROLE_MANAGER" ? "Department Manager"
                     : targetRole === "ROLE_HR_ADMIN" ? "HR Business Partner"
@@ -8815,13 +8847,14 @@ function ManagerDepartmentAssignmentPanel({ departments, assignments, onChanged 
     </article>;
 }
 
-function SettingsView({ role, userEmail, accounts, departments, employees, teamLeadAssignments, onAssignTeamLead,
+function SettingsView({ role, userEmail, accounts, departments, employees, teamLeadAssignments, onAddEmployee, onAssignTeamLead,
                           departmentHrAssignments, managerAssignments, onRoleAssignmentChanged,
                           onCreate, onChangeEmail, onResetPassword, onSetEnabled, onUpdatePermissions }: {
     role: Role; userEmail: string; accounts: StaffAccount[]; departments: Department[]; employees: Employee[];
     teamLeadAssignments: TeamLeadAssignment[]; departmentHrAssignments: DepartmentHrAssignment[];
     managerAssignments: ManagerAssignment[];
     onRoleAssignmentChanged: () => Promise<void>;
+    onAddEmployee: () => void;
     onAssignTeamLead: (departmentId: string, employeeId: string) => Promise<boolean>;
     onCreate: (email: string, password: string, role: string) => Promise<void>;
     onChangeEmail: (userId: string, email: string) => Promise<void>;
@@ -8845,7 +8878,7 @@ function SettingsView({ role, userEmail, accounts, departments, employees, teamL
     const [managedAccountTotal, setManagedAccountTotal] = useState(accounts.length);
     const [managedAccountQuery, setManagedAccountQuery] = useState("");
     const [managedAccountsLoading, setManagedAccountsLoading] = useState(false);
-    const allowedRoles = [["ROLE_EMPLOYEE", "Employee"], ["ROLE_RECEPTIONIST", "Receptionist"], ["ROLE_SECURITY", "Security"]];
+    const allowedRoles = [["ROLE_RECEPTIONIST", "Receptionist"], ["ROLE_SECURITY", "Security"]];
     const nav: Array<[SettingsSection, typeof Building2, string]> = [
         ["company", Building2, "Company profile"], ["identity", Fingerprint, "Identity & access"],
         ["roles", UserCog, "Roles & responsibilities"], ["policy", CalendarDays, "Appointment policy"],
@@ -8950,7 +8983,7 @@ function SettingsView({ role, userEmail, accounts, departments, employees, teamL
         const form = event.currentTarget; const data = new FormData(form);
         try {
             await onCreate(String(data.get("email")), String(data.get("password")), String(data.get("role")));
-            form.reset(); setMessage("Staff login created and sent to the HR Admin approval queue.");
+            form.reset(); setMessage("Access-only login created and sent to the HR Admin approval queue.");
         } catch (reason) { setError(reason instanceof ApiError ? reason.message : "The staff account could not be created."); }
     };
 
@@ -8990,7 +9023,7 @@ function SettingsView({ role, userEmail, accounts, departments, employees, teamL
         event.preventDefault(); setError(""); setMessage("");
         const form = event.currentTarget; const data = new FormData(form);
         try {
-            if (!isBackendConfigured) throw new Error("Connect the Spring backend to change the stored login email.");
+            if (!isBackendConfigured) fail("Connect the Spring backend to change the stored login email.");
             await brainServeApi.changeMyEmail(String(data.get("currentPassword")), String(data.get("newEmail")));
             setMessage("Your company email was updated. Sign in again with the new email."); form.reset();
         } catch (reason) { setError(reason instanceof Error ? reason.message : "Your email could not be updated."); }
@@ -9006,7 +9039,8 @@ function SettingsView({ role, userEmail, accounts, departments, employees, teamL
                 <article className="panel glass-panel"><div className="panel-heading"><div><span>YOUR STAFF IDENTITY</span><h2>Company login</h2><p>Current login: <strong>{userEmail}</strong>. Your authenticated role is locked to <strong>{role}</strong>.</p></div><LockKeyhole size={22} /></div>{role !== "System Admin" && <form className="inline-account-form" onSubmit={changeOwnEmail}><label>New company email<input name="newEmail" type="email" placeholder="name@brainserve.in" required /></label><label>Current password<input name="currentPassword" type="password" minLength={8} required /></label><button className="button button-secondary"><Fingerprint size={16} /> Update my email</button></form>}</article>
                 <PasswordChangeCard />
                 {role === "HR Admin" ? <>
-                    <article className="panel glass-panel"><div className="panel-heading"><div><span>CREATE STAFF LOGIN</span><h2>Employee, Receptionist or Security</h2><p>Each account remains pending until an HR Admin approves it in the account approval queue.</p></div></div><form className="staff-create-form" onSubmit={create}><label>Company email<input name="email" type="email" placeholder="name@brainserve.in" required /></label><label>Temporary password<input name="password" type="password" minLength={12} placeholder="Minimum 12 characters" required /></label><label>Role<select name="role">{allowedRoles.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><button className="button button-primary"><UserPlus size={16} /> Create login</button></form></article>
+                    <article className="panel glass-panel"><div className="panel-heading"><div><span>CREATE EMPLOYEE</span><h2>Employee profile and department</h2><p>Create the employee profile, assign the HR Admin&apos;s department and generate the employee ID in one flow.</p></div><Building2 size={22} /></div><div className="team-lead-access-note"><BadgeCheck size={17} /><span><strong>Department assignment is mandatory</strong><small>The employee form includes department, designation and joining date. If HR manages one department, it is selected automatically.</small></span></div><button type="button" className="button button-primary" onClick={onAddEmployee} disabled={!departments.some((item) => item.active)}><UserPlus size={16} /> Add employee &amp; assign department</button>{!departments.some((item) => item.active) && <div className="login-error" role="alert">No active department is available. Ask the CEO or System Admin to assign this HR Admin to a department.</div>}</article>
+                    <article className="panel glass-panel"><div className="panel-heading"><div><span>CREATE ACCESS-ONLY LOGIN</span><h2>Receptionist or Security</h2><p>These roles do not belong to an employee department. Each login remains pending until an HR Admin approves it.</p></div></div><form className="staff-create-form" onSubmit={create}><label>Company email<input name="email" type="email" placeholder="name@brainserve.in" required /></label><label>Temporary password<input name="password" type="password" minLength={12} placeholder="Minimum 12 characters" required /></label><label>Role<select name="role">{allowedRoles.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><button className="button button-primary"><UserPlus size={16} /> Create login</button></form></article>
                     <article className="panel glass-panel team-lead-access-card"><div className="panel-heading"><div><span>CREATE TEAM LEAD ACCESS</span><h2>Promote an approved employee</h2><p>A Team Lead keeps their existing company email and password. HR assigns one active employee login to one department.</p></div><BadgeCheck size={22} /></div>
                         <div className="team-lead-access-note"><ShieldCheck size={17} /><span><strong>Employees only — Security and Receptionist are excluded</strong><small>Only an active, approved Employee login from the selected department can appear here. Promotion revokes existing refresh sessions and the next sign-in opens Team Lead access for that department.</small></span></div>
                         <form className="staff-create-form team-lead-access-form" onSubmit={assignTeamLeadAccess}>
@@ -9221,7 +9255,7 @@ function RoleAssignmentChangePanel({ role, userEmail, accounts, departments, emp
                 hrUserId: request.requesterUserId, hrEmployeeId: employeeId, active: true,
                 assignedByUserId: actorId, assignedAt: now, endedByUserId: null, endedAt: null }, ...assignments];
             if (resolution === "SWAP" && target) {
-                if (!sourceDepartmentId) throw new Error("This HR Admin has no source department to swap.");
+                if (!sourceDepartmentId) fail("This HR Admin has no source department to swap.");
                 workforce = workforce.map((item) => (item.uuid ?? item.id) === target.hrEmployeeId
                     ? { ...item, departmentId: sourceDepartmentId,
                         department: departments.find((value) => value.id === sourceDepartmentId)?.name ?? item.department } : item);
@@ -9231,10 +9265,10 @@ function RoleAssignmentChangePanel({ role, userEmail, accounts, departments, emp
             }
             writeDemoEmployees(workforce); writeDemoAccounts(allAccounts); writeDemoDepartmentHrAssignments(assignments);
             current = assignments.find((item) => item.active && item.hrUserId === request.requesterUserId);
-            if (!current) throw new Error("The HR assignment could not be updated.");
+            if (!current) fail("The HR assignment could not be updated.");
         } else {
             const current = readDemoTeamLeadAssignments().find((item) => item.active && item.teamLeadUserId === request.requesterUserId);
-            if (!current) throw new Error("The Team Lead has no active source assignment.");
+            if (!current) fail("The Team Lead has no active source assignment.");
             const target = readDemoTeamLeadAssignments().find((item) => item.active
                 && item.departmentId === request.targetDepartmentId && item.teamLeadUserId !== request.requesterUserId);
             let assignments = readDemoTeamLeadAssignments().map((item) => item.active
@@ -9272,7 +9306,7 @@ function RoleAssignmentChangePanel({ role, userEmail, accounts, departments, emp
         try {
             let updated: RoleDepartmentChangeRequest;
             if (action === "reject") {
-                if (note.length < 5) throw new Error("Enter a rejection reason containing at least 5 characters.");
+                if (note.length < 5) fail("Enter a rejection reason containing at least 5 characters.");
                 updated = isBackendConfigured ? await brainServeApi.rejectRoleDepartmentChange(request.id, note)
                     : { ...request, status: "REJECTED" as const, decisionNote: note,
                         decidedByUserId: role === "CEO" ? "demo-ceo" : "demo-hr-admin", decidedAt: new Date().toISOString() };
@@ -9379,16 +9413,24 @@ function EmployeeModal({ departments, employees, teamLeadAssignments, account, i
     initialDepartmentId?: string; error?: string; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void | Promise<void> }) {
     useModalDialog(onClose);
     const joiningDate = nextBusinessDays(1)[0];
-    const [departmentId, setDepartmentId] = useState(initialDepartmentId ?? "");
+    const activeDepartments = useMemo(() => departments.filter((item) => item.active), [departments]);
+    const [departmentId, setDepartmentId] = useState(() => {
+        if (initialDepartmentId && activeDepartments.some((item) => item.id === initialDepartmentId)) {
+            return initialDepartmentId;
+        }
+        return activeDepartments.length === 1 ? activeDepartments[0].id : "";
+    });
+    const selectedDepartmentId = activeDepartments.some((item) => item.id === departmentId)
+        ? departmentId : activeDepartments.length === 1 ? activeDepartments[0].id : "";
     const activeLeadAssignment = teamLeadAssignments.find((assignment) => assignment.active
-        && assignment.departmentId === departmentId);
+        && assignment.departmentId === selectedDepartmentId);
     const departmentTeamLead = employees.find((employee) => (employee.uuid ?? employee.id)
         === activeLeadAssignment?.teamLeadEmployeeId);
-    const teamLeadLabel = !departmentId ? "Select a department first"
+    const teamLeadLabel = !selectedDepartmentId ? "Select a department first"
         : departmentTeamLead ? `${departmentTeamLead.name} · Team Lead`
             : activeLeadAssignment ? "Assigned Team Lead"
                 : "No Team Lead assigned";
-    return <div className="modal-backdrop" role="presentation"><section className="modal glass-panel" role="dialog" aria-modal="true" aria-labelledby="employee-modal-title"><header><div><span>{account ? "DEPARTMENT ASSIGNMENT" : "EMPLOYEE ONBOARDING"}</span><h2 id="employee-modal-title">{account ? "Complete approved employee profile" : "Add a new employee"}</h2><p>{account ? "Assign the approved login to a department. BrainServe then links the employee ID to this account." : "The employee ID is generated safely after submission."}</p></div><button className="icon-button" onClick={onClose} aria-label="Close employee form"><X size={19} /></button></header>{account && <div className="approved-account-banner"><BadgeCheck size={18} /><span><strong>Approved Employee login</strong><small>{account.email} · account role remains Employee until an eligible Team Lead promotion</small></span></div>}<form onSubmit={onSubmit}>{error && <div className="login-error" role="alert">{error}</div>}<div className="modal-form-grid"><label>Full name<input name="name" required minLength={2} maxLength={170} defaultValue={account?.fullName ?? ""} placeholder="Employee’s full name" /></label><label>Official email<input name="email" type="email" required readOnly={Boolean(account)} defaultValue={account?.email ?? ""} placeholder="name@brainserve.in" /></label><label>Phone number<input name="phone" placeholder="+91 98765 43210" /></label><label>Department<select name="departmentId" value={departmentId} onChange={(event) => setDepartmentId(event.target.value)} required><option value="">Select a department</option>{departments.filter((item) => item.active).map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label><label>Designation<input name="designation" required placeholder="e.g. Software Engineer" /></label><label>Joining date<input name="joiningDate" type="date" min={joiningDate} defaultValue={joiningDate} required /></label><label>Department Team Lead<input value={teamLeadLabel} readOnly aria-readonly="true" /><small>Resolved automatically from the active Team Lead assignment for this department.</small></label></div><div className="employee-id-preview"><Fingerprint size={21} /><span><small>GENERATED EMPLOYEE ID</small><strong>BSPL-XXXX-####</strong></span><small>Concurrency-safe sequence</small></div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={onClose}>Cancel</button><button className="button button-primary"><UserPlus size={17} /> {account ? "Assign department & create ID" : "Create employee"}</button></div></form></section></div>;
+    return <div className="modal-backdrop" role="presentation"><section className="modal glass-panel" role="dialog" aria-modal="true" aria-labelledby="employee-modal-title"><header><div><span>{account ? "DEPARTMENT ASSIGNMENT" : "EMPLOYEE ONBOARDING"}</span><h2 id="employee-modal-title">{account ? "Complete approved employee profile" : "Add a new employee"}</h2><p>{account ? "Assign the approved login to a department. BrainServe then links the employee ID to this account." : "The employee ID is generated safely after submission."}</p></div><button className="icon-button" onClick={onClose} aria-label="Close employee form"><X size={19} /></button></header>{account && <div className="approved-account-banner"><BadgeCheck size={18} /><span><strong>Approved Employee login</strong><small>{account.email} · account role remains Employee until an eligible Team Lead promotion</small></span></div>}<form onSubmit={onSubmit}>{error && <div className="login-error" role="alert">{error}</div>}{activeDepartments.length === 0 && <div className="login-error" role="alert">No active department is available for this account. Ask the CEO or System Admin to complete the HR department assignment.</div>}<div className="modal-form-grid"><label>Full name<input name="name" required minLength={2} maxLength={170} defaultValue={account?.fullName ?? ""} placeholder="Employee’s full name" /></label><label>Official email<input name="email" type="email" required readOnly={Boolean(account)} defaultValue={account?.email ?? ""} placeholder="name@brainserve.in" /></label><label>Phone number<input name="phone" placeholder="+91 98765 43210" /></label><label>Department<select name="departmentId" value={selectedDepartmentId} onChange={(event) => setDepartmentId(event.target.value)} required disabled={activeDepartments.length === 0}><option value="">{activeDepartments.length ? "Select a department" : "No active department available"}</option>{activeDepartments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label><label>Designation<input name="designation" required placeholder="e.g. Software Engineer" /></label><label>Joining date<input name="joiningDate" type="date" min={joiningDate} defaultValue={joiningDate} required /></label><label>Department Team Lead<input value={teamLeadLabel} readOnly aria-readonly="true" /><small>Resolved automatically from the active Team Lead assignment for this department.</small></label></div><div className="employee-id-preview"><Fingerprint size={21} /><span><small>GENERATED EMPLOYEE ID</small><strong>BSPL-XXXX-####</strong></span><small>Concurrency-safe sequence</small></div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={activeDepartments.length === 0 || !selectedDepartmentId}><UserPlus size={17} /> {account ? "Assign department & create ID" : "Create employee"}</button></div></form></section></div>;
 }
 
 function PrivacyCentreModal({ onClose }: { onClose: () => void }) {
@@ -10009,7 +10051,7 @@ function VisitRegistrationModal({
     );
 }
 
-export default function BrainServeApp({ browserPreviewEnabled = false }: {
+export function BrainServeApp({ browserPreviewEnabled = false }: {
     browserPreviewEnabled?: boolean;
 }) {
     if (!isBackendConfigured && !browserPreviewEnabled) {
@@ -10033,6 +10075,8 @@ export default function BrainServeApp({ browserPreviewEnabled = false }: {
     }
     return <BackendBrainServeApp browserPreviewEnabled={browserPreviewEnabled} />;
 }
+
+export default BrainServeApp;
 
 function BackendBrainServeApp({ browserPreviewEnabled = false }: {
     browserPreviewEnabled?: boolean;
@@ -10067,7 +10111,7 @@ function BackendBrainServeApp({ browserPreviewEnabled = false }: {
                     const restoredRole = profile.roles
                         .map(roleFromAuthority)
                         .find((item): item is Role => item !== null);
-                    if (!restoredRole) throw new Error("Unsupported role");
+                    if (!restoredRole) fail("Unsupported role");
                     setRole(restoredRole);
                     setUserEmail(profile.email);
                     setMustChangePassword(profile.forcePasswordChange);

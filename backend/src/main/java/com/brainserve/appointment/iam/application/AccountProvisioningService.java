@@ -151,6 +151,12 @@ public class AccountProvisioningService {
 
     @Transactional
     public UserAccount approveByHr(UUID actorId, UUID targetId) {
+        UserAccount target = require(targetId);
+        if (target.getRoles().equals(Set.of(SystemRole.ROLE_EMPLOYEE)) && target.getEmployeeId() == null) {
+            throw new BusinessException("EMPLOYEE_DEPARTMENT_ASSIGNMENT_REQUIRED",
+                    "Select a department, designation and joining date before approving the Employee",
+                    HttpStatus.UNPROCESSABLE_ENTITY);
+        }
         return approve(actorId, targetId, SystemRole.ROLE_HR_ADMIN,
                 AccountStatus.PENDING_HR_APPROVAL, LOWER_ROLES, "HR_STAFF_ACCOUNT_APPROVED");
     }

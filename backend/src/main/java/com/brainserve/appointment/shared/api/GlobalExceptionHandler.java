@@ -16,10 +16,13 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
+import java.io.IOException;
 import java.net.URI;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @RestControllerAdvice
@@ -63,6 +66,41 @@ public class GlobalExceptionHandler {
         );
     }
 
+    /**
+     * Handles invalid path variables and request parameters.
+     *
+     * Example:
+     * /users/demo-hr-admin where a UUID is required.
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ProblemDetail typeMismatch(
+            MethodArgumentTypeMismatchException ex,
+            HttpServletRequest request
+    ) {
+        String parameterName =
+                ex.getName() == null
+                        ? "parameter"
+                        : ex.getName();
+
+        List<Map<String, String>> errors = List.of(
+                Map.of(
+                        "field",
+                        parameterName,
+                        "message",
+                        "Invalid value"
+                )
+        );
+
+        return problem(
+                HttpStatus.BAD_REQUEST,
+                "INVALID_REQUEST_PARAMETER",
+                "The request parameter '" + parameterName
+                        + "' has an invalid value",
+                request,
+                errors
+        );
+    }
+
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ProblemDetail conflict(
             DataIntegrityViolationException ex,
@@ -70,8 +108,14 @@ public class GlobalExceptionHandler {
     ) {
         log.warn(
                 "Database conflict correlationId={} path={}",
-                MDC.get("correlationId"),
+                correlationId(),
                 request.getRequestURI()
+        );
+
+        log.debug(
+                "Database conflict details correlationId={}",
+                correlationId(),
+                ex
         );
 
         return problem(
@@ -90,8 +134,14 @@ public class GlobalExceptionHandler {
     ) {
         log.warn(
                 "Redis unavailable correlationId={} path={}",
-                MDC.get("correlationId"),
+                correlationId(),
                 request.getRequestURI()
+        );
+
+        log.debug(
+                "Redis connection failure details correlationId={}",
+                correlationId(),
+                ex
         );
 
         return problem(
@@ -113,7 +163,7 @@ public class GlobalExceptionHandler {
     ) {
         log.warn(
                 "Access denied correlationId={} path={}",
-                MDC.get("correlationId"),
+                correlationId(),
                 request.getRequestURI()
         );
 
@@ -127,9 +177,11 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * A browser may close an SSE connection during refresh, navigation,
-     * logout or network interruption. The response is already committed,
-     * so no ProblemDetail response must be written.
+     * Browsers normally close SSE connections during refresh, logout,
+     * navigation or temporary network interruption.
+     *
+     * The SSE response may already be committed, so a ProblemDetail
+     * response must not be written.
      */
     @ExceptionHandler({
             AsyncRequestNotUsableException.class,
@@ -139,24 +191,31 @@ public class GlobalExceptionHandler {
             Exception ex,
             HttpServletRequest request
     ) {
-        log.debug(
-                "Client connection closed correlationId={} path={}",
-                MDC.get("correlationId"),
-                request.getRequestURI()
-        );
+        logDisconnectedClient(request);
     }
 
     /**
-     * Keep this as the final handler because it catches every other exception.
+     * Keep this as the final handler because it catches every remaining
+     * exception.
      */
     @ExceptionHandler(Exception.class)
     public ProblemDetail unexpected(
             Exception ex,
             HttpServletRequest request
     ) {
+        /*
+         * Client-disconnection exceptions can sometimes be wrapped inside
+         * IOException or another servlet exception. Do not attempt to write
+         * a JSON response after an SSE response has already been committed.
+         */
+        if (isDisconnectedClient(ex)) {
+            logDisconnectedClient(request);
+            return null;
+        }
+
         log.error(
                 "Unhandled request failure correlationId={} path={}",
-                MDC.get("correlationId"),
+                correlationId(),
                 request.getRequestURI(),
                 ex
         );
@@ -183,7 +242,8 @@ public class GlobalExceptionHandler {
         problem.setType(
                 URI.create(
                         "https://brainserve.in/problems/"
-                                + code.toLowerCase().replace('_', '-')
+                                + code.toLowerCase(Locale.ROOT)
+                                .replace('_', '-')
                 )
         );
 
@@ -191,12 +251,9 @@ public class GlobalExceptionHandler {
         problem.setInstance(URI.create(request.getRequestURI()));
         problem.setProperty("errorCode", code);
         problem.setProperty("timestamp", Instant.now());
-        problem.setProperty(
-                "correlationId",
-                MDC.get("correlationId")
-        );
+        problem.setProperty("correlationId", correlationId());
 
-        if (fieldErrors != null) {
+        if (fieldErrors != null && !fieldErrors.isEmpty()) {
             problem.setProperty("fieldErrors", fieldErrors);
         }
 
@@ -212,5 +269,54 @@ public class GlobalExceptionHandler {
                         ? "Invalid value"
                         : error.getDefaultMessage()
         );
+    }
+
+    private boolean isDisconnectedClient(Throwable throwable) {
+        Throwable current = throwable;
+
+        while (current != null) {
+            if (current instanceof ClientAbortException
+                    || current instanceof AsyncRequestNotUsableException) {
+                return true;
+            }
+
+            if (current instanceof IOException
+                    && hasDisconnectMessage(current.getMessage())) {
+                return true;
+            }
+
+            current = current.getCause();
+        }
+
+        return false;
+    }
+
+    private boolean hasDisconnectMessage(String message) {
+        if (message == null) {
+            return false;
+        }
+
+        String normalized = message.toLowerCase(Locale.ROOT);
+
+        return normalized.contains("broken pipe")
+                || normalized.contains("connection reset")
+                || normalized.contains("connection aborted")
+                || normalized.contains("connection was aborted")
+                || normalized.contains("forcibly closed")
+                || normalized.contains("response is no longer usable");
+    }
+
+    private void logDisconnectedClient(
+            HttpServletRequest request
+    ) {
+        log.debug(
+                "Client connection closed correlationId={} path={}",
+                correlationId(),
+                request.getRequestURI()
+        );
+    }
+
+    private String correlationId() {
+        return MDC.get("correlationId");
     }
 }

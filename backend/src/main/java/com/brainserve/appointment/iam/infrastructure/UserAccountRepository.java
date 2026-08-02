@@ -51,9 +51,9 @@ public interface UserAccountRepository extends JpaRepository<UserAccount, UUID> 
              where user.status = :status
                and user.enabled = true
                and user.archived = false
-               and (:query is null
-                    or lower(user.fullName) like lower(concat('%', :query, '%'))
-                    or lower(user.email) like lower(concat('%', :query, '%')))
+               and (:query = ''
+                    or lower(user.fullName) like concat('%', :query, '%')
+                    or lower(user.email) like concat('%', :query, '%'))
                and (:role is null or :role member of user.roles)
                and (:departmentId is null or exists (
                     select employee.id
@@ -79,9 +79,9 @@ public interface UserAccountRepository extends JpaRepository<UserAccount, UUID> 
                     or (:includeFormerCeo = true
                         and role = :ceoRole
                         and user.status in :formerCeoStatuses))
-               and (:query is null
-                    or lower(user.fullName) like lower(concat('%', :query, '%'))
-                    or lower(user.email) like lower(concat('%', :query, '%')))
+               and (:query = ''
+                    or lower(user.fullName) like concat('%', :query, '%')
+                    or lower(user.email) like concat('%', :query, '%'))
             """,
             countQuery = """
             select count(distinct user.id)
@@ -95,9 +95,9 @@ public interface UserAccountRepository extends JpaRepository<UserAccount, UUID> 
                     or (:includeFormerCeo = true
                         and role = :ceoRole
                         and user.status in :formerCeoStatuses))
-               and (:query is null
-                    or lower(user.fullName) like lower(concat('%', :query, '%'))
-                    or lower(user.email) like lower(concat('%', :query, '%')))
+               and (:query = ''
+                    or lower(user.fullName) like concat('%', :query, '%')
+                    or lower(user.email) like concat('%', :query, '%'))
             """)
     Page<UserAccount> findOperationalRoleTransitionCandidates(
             @Param("activeStatus") AccountStatus activeStatus,
