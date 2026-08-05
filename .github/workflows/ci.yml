@@ -14,35 +14,15 @@ jobs:
     name: Frontend
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: frontend
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Debug: show frontend layout
-        run: |
-          echo "Runner OS: $RUNNER_OS"
-          echo "Working dir: $(pwd)"
-          echo "HOME: $HOME"
-          echo "Files in working dir:"
-          ls -la || true
-          echo "Check package-lock.json:"
-          ls -la package-lock.json || true
-
-      - name: Ensure npm cache dirs exist
-        run: |
-          mkdir -p $HOME/.npm
-          mkdir -p $HOME/.cache
 
       - name: Set up Node.js 24
         uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
-          # Make this path relative to the step's working-directory (frontend)
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
@@ -55,7 +35,7 @@ jobs:
         run: npm run lint
 
       - name: Run tests
-        run: npm test -- --run
+        run: npm test
 
       - name: Build frontend
         run: npm run build
@@ -72,26 +52,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Debug: show backend layout
-        run: |
-          echo "Runner OS: $RUNNER_OS"
-          echo "Working dir: $(pwd)"
-          echo "Files in working dir:"
-          ls -la || true
-          echo "Check pom.xml:"
-          ls -la pom.xml || true
-
-      - name: Ensure maven cache dir exists
-        run: mkdir -p $HOME/.m2/repository
-
       - name: Set up Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
-          # Make this path relative to the step's working-directory (backend)
-          cache-dependency-path: pom.xml
+          cache-dependency-path: backend/pom.xml
 
       - name: Display Java and Maven versions
         run: |
