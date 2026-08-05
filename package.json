@@ -8,7 +8,7 @@
   "scripts": {
     "install:ci": "bash scripts/install-ci.sh",
     "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vite",
-    "dev:locked": "VITE_BRAINSERVE_LOCKED=1 WRANGLER_LOG_PATH=.wrangler/wrangler.log vite",
+    "dev:locked": "cross-env BRAINSERVE_LOCAL_BACKEND=1 VITE_BRAINSERVE_LOCKED=1 NEXT_PUBLIC_API_BASE_URL=http://localhost:8080/api/v1 vite",
     "dev:backend": "cross-env BRAINSERVE_LOCAL_BACKEND=1 NEXT_PUBLIC_API_BASE_URL=http://localhost:8080/api/v1 vite --host localhost --port 5173 --force",
     "build": "npm run typecheck && vinext build",
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
@@ -40,7 +40,7 @@
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",
     "@vitejs/plugin-rsc": "0.5.26",
-    "cross-env": "7.0.3",
+    "cross-env": "^7.0.3",
     "drizzle-kit": "0.31.10",
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.6",

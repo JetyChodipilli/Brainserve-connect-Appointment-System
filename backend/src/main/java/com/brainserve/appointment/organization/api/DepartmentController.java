@@ -6,9 +6,12 @@ import com.brainserve.appointment.organization.infrastructure.DepartmentReposito
 import com.brainserve.appointment.shared.application.BusinessException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,14 +20,20 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/departments")
 public class DepartmentController {
+
+    private static final Set<String> REQUIRED_ROUTING_DEPARTMENT_CODES =
+            Set.of("EXEC", "HR");
 
     private final DepartmentRepository departments;
     private final AuditService audit;
@@ -37,14 +46,6 @@ public class DepartmentController {
         this.audit = audit;
     }
 
-    /**
-     * Department directory is required by:
-     * - System Admin
-     * - CEO
-     * - HR Admin
-     * - Employees with EMPLOYEE_READ
-     * - Team Leads with TEAM_LEAD_DIRECTORY_VIEW
-     */
     @GetMapping
     @PreAuthorize("""
             hasAnyAuthority(
@@ -52,9 +53,11 @@ public class DepartmentController {
                 'ROLE_CEO',
                 'ROLE_HR_ADMIN',
                 'EMPLOYEE_READ',
-                'TEAM_LEAD_DIRECTORY_VIEW'
+                'TEAM_LEAD_DIRECTORY_VIEW',
+                'WORKFORCE_RECORD_VIEW'
             )
             """)
+    @Transactional(readOnly = true)
     public List<DepartmentResponse> list() {
         return departments.findAllByOrderByNameAsc()
                 .stream()
@@ -63,39 +66,55 @@ public class DepartmentController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('DEPARTMENT_MANAGE')")
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("""
+            hasAnyAuthority(
+                'ROLE_SYSTEM_ADMIN',
+                'ROLE_CEO',
+                'DEPARTMENT_MANAGE'
+            )
+            """)
     @Transactional
     public DepartmentResponse create(
             @Valid @RequestBody DepartmentRequest request
     ) {
         if (departments.existsByCodeIgnoreCase(request.code())) {
-            throw new BusinessException(
-                    "DEPARTMENT_CODE_EXISTS",
-                    "Department code already exists",
-                    HttpStatus.CONFLICT
-            );
+            throw departmentCodeConflict();
         }
 
-        Department created = departments.save(
-                new Department(request.code(), request.name())
-        );
+        final Department created;
+        try {
+            created = departments.saveAndFlush(
+                    new Department(request.code(), request.name())
+            );
+        } catch (DataIntegrityViolationException exception) {
+            // A database unique constraint is still required to close the
+            // exists-check race between concurrent create requests.
+            throw departmentCodeConflict();
+        }
 
         audit.record(
                 "DEPARTMENT_CREATED",
                 "DEPARTMENT",
                 created.getId().toString(),
-                "{\"code\":\"" + created.getCode() + "\"}"
+                auditDetails(created)
         );
 
         return DepartmentResponse.from(created);
     }
 
     @PatchMapping("/{id}/status")
-    @PreAuthorize("hasAuthority('DEPARTMENT_MANAGE')")
+    @PreAuthorize("""
+            hasAnyAuthority(
+                'ROLE_SYSTEM_ADMIN',
+                'ROLE_CEO',
+                'DEPARTMENT_MANAGE'
+            )
+            """)
     @Transactional
-    public DepartmentResponse status(
+    public DepartmentResponse changeStatus(
             @PathVariable UUID id,
-            @RequestBody StatusRequest request
+            @Valid @RequestBody StatusRequest request
     ) {
         Department department = departments.findById(id)
                 .orElseThrow(() -> new BusinessException(
@@ -104,10 +123,9 @@ public class DepartmentController {
                         HttpStatus.NOT_FOUND
                 ));
 
-        if (!request.active()
-                && ("EXEC".equalsIgnoreCase(department.getCode())
-                || "HR".equalsIgnoreCase(department.getCode()))) {
+        boolean requestedActive = Boolean.TRUE.equals(request.active());
 
+        if (!requestedActive && isRequiredRoutingDepartment(department)) {
             throw new BusinessException(
                     "ROUTING_DEPARTMENT_REQUIRED",
                     "Executive Office and Human Resources must remain active for appointment routing",
@@ -115,32 +133,78 @@ public class DepartmentController {
             );
         }
 
-        department.changeStatus(request.active());
+        if (department.isActive() == requestedActive) {
+            return DepartmentResponse.from(department);
+        }
+
+        department.changeStatus(requestedActive);
+
+        try {
+            departments.saveAndFlush(department);
+        } catch (ObjectOptimisticLockingFailureException exception) {
+            throw new BusinessException(
+                    "DEPARTMENT_STATUS_CONFLICT",
+                    "Department status changed in another request; reload and try again",
+                    HttpStatus.CONFLICT
+            );
+        }
 
         audit.record(
-                request.active()
+                requestedActive
                         ? "DEPARTMENT_ACTIVATED"
                         : "DEPARTMENT_DEACTIVATED",
                 "DEPARTMENT",
                 department.getId().toString(),
-                "{\"code\":\"" + department.getCode() + "\"}"
+                auditDetails(department)
         );
 
         return DepartmentResponse.from(department);
     }
 
+    private static boolean isRequiredRoutingDepartment(Department department) {
+        return REQUIRED_ROUTING_DEPARTMENT_CODES.contains(
+                department.getCode().toUpperCase(Locale.ROOT)
+        );
+    }
+
+    private static BusinessException departmentCodeConflict() {
+        return new BusinessException(
+                "DEPARTMENT_CODE_EXISTS",
+                "Department code already exists",
+                HttpStatus.CONFLICT
+        );
+    }
+
+    private static String auditDetails(Department department) {
+        // Department codes are restricted to [A-Z0-9_-], so this remains
+        // valid JSON and cannot inject an additional property.
+        return "{\"code\":\"" + department.getCode() + "\"}";
+    }
+
     public record DepartmentRequest(
             @NotBlank
-            @Pattern(regexp = "[A-Za-z0-9_-]{2,20}")
+            @Pattern(
+                    regexp = "[A-Z0-9_-]{2,20}",
+                    message = "code must contain 2-20 letters, numbers, underscores, or hyphens"
+            )
             String code,
 
             @NotBlank
             @Size(max = 120)
             String name
     ) {
+        public DepartmentRequest {
+            code = code == null
+                    ? null
+                    : code.trim().toUpperCase(Locale.ROOT);
+            name = name == null ? null : name.trim();
+        }
     }
 
-    public record StatusRequest(boolean active) {
+    public record StatusRequest(
+            @NotNull(message = "active is required")
+            Boolean active
+    ) {
     }
 
     public record DepartmentResponse(

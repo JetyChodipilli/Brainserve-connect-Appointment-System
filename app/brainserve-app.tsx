@@ -2139,7 +2139,7 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
     const [staffAccounts, setStaffAccounts] = useState(() => isBackendConfigured
         ? initialStaffAccounts : mergeDemoStaffAccounts(initialStaffAccounts));
     const [departments, setDepartments] = useState<Department[]>(() => isBackendConfigured
-        ? initialDepartments : readDemoDepartments());
+        ? [] : readDemoDepartments());
     const [departmentSummaries, setDepartmentSummaries] = useState<DepartmentEmployeeSummary[]>([]);
     const [teamLeadAssignments, setTeamLeadAssignments] = useState<TeamLeadAssignment[]>(() => isBackendConfigured
         ? initialTeamLeadAssignments : readDemoTeamLeadAssignments());
@@ -2368,7 +2368,17 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
                         active: true, assignedByUserId: "", assignedAt: "", endedByUserId: null, endedAt: null }]);
                     hostNames = new Map(nextEmployees.map((item) => [item.uuid ?? item.id, item.name]));
                 } catch (reason) { errors.push(reason instanceof ApiError ? reason.message : "Your Team Lead workspace could not be loaded."); }
-            } else if (!["Security", "System Admin"].includes(role)) {
+            } else if (role === "System Admin") {
+                try {
+                    const departmentList = await brainServeApi.departments();
+                    if (!active) return;
+                    setDepartments(departmentList);
+                } catch (reason) {
+                    errors.push(reason instanceof ApiError
+                        ? reason.message
+                        : "The database department directory could not be loaded.");
+                }
+            } else if (role !== "Security") {
                 try {
                     const [employeePage, departmentList, summaryList, assignmentList, hrAssignmentList, managerAssignmentList] = await Promise.all([
                         brainServeApi.employees(), ["HR Admin", "Manager"].includes(role)
@@ -3409,7 +3419,6 @@ function MyProfileView({ role, userEmail, departments, employees, staffAccounts,
         };
     }, [departments, employees, role, staffAccounts, userEmail]);
     const [profile, setProfile] = useState<MyProfile>(() => demoProfile());
-    const [backendProfileLoaded, setBackendProfileLoaded] = useState(!isBackendConfigured);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
     const [message, setMessage] = useState("");
@@ -3445,7 +3454,7 @@ function MyProfileView({ role, userEmail, departments, employees, staffAccounts,
     useEffect(() => {
         if (!isBackendConfigured) return;
         let active = true;
-        brainServeApi.myProfile().then((value) => { if (active) { setProfile(value); setBackendProfileLoaded(true); onProfileUpdated(value); setError(""); } })
+        brainServeApi.myProfile().then((value) => { if (active) { setProfile(value); onProfileUpdated(value); setError(""); } })
             .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "Your profile could not be loaded."); });
         if (["HR Admin", "Team Lead"].includes(role)) {
             brainServeApi.myRoleDepartmentChanges().then((items) => { if (active) setChangeRequests(items); })
@@ -3458,7 +3467,6 @@ function MyProfileView({ role, userEmail, departments, employees, staffAccounts,
         const eligible = ["CEO", "HR Admin", "Team Lead", "Reception", "Security"].includes(role);
         if (!eligible) return;
         if (isBackendConfigured) {
-            if (!backendProfileLoaded) return;
             let active = true;
             Promise.all([brainServeApi.myAccountClosures(), brainServeApi.accountClosureCandidates(profile.userId)])
                 .then(([requests, candidates]) => { if (active) { setClosureRequests(requests); setClosureCandidates(candidates); } })
@@ -3466,7 +3474,7 @@ function MyProfileView({ role, userEmail, departments, employees, staffAccounts,
             return () => { active = false; };
         }
         return;
-    }, [backendProfileLoaded, employees, profile.departmentId, profile.userId, role]);
+    }, [employees, profile.departmentId, profile.userId, role]);
 
     const uploadPhoto = async (file: File | undefined) => {
         if (!file) return;

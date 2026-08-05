@@ -32,6 +32,14 @@ test("organization actions remain permission controlled and transactional", () =
   assert.ok(departmentController.includes("DEPARTMENT_DEACTIVATED"));
 });
 
+test("System Admin account lifecycle filters use database departments instead of preview fixtures", () => {
+  assert.ok(departmentController.includes("'WORKFORCE_RECORD_VIEW'"));
+  assert.ok(app.includes('isBackendConfigured\n        ? [] : readDemoDepartments()'));
+  assert.ok(app.includes('else if (role === "System Admin")'));
+  assert.ok(app.includes("const departmentList = await brainServeApi.departments()"));
+  assert.ok(app.includes("setDepartments(departmentList)"));
+});
+
 test("CEO sees all departments while HR, Manager and Team Lead receive only their assigned department", () => {
   assert.ok(organizationScopeController.includes('@GetMapping("/visible")'));
   assert.ok(organizationScopeController.includes("hasAnyRole('CEO','HR_ADMIN','MANAGER','TEAM_LEAD')"));

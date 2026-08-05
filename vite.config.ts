@@ -8,14 +8,20 @@ const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
 
 const { d1, r2 } = hostingConfig;
 
-// Codex/macOS sandbox support.
 const isCodexSeatbeltSandbox =
     process.env.CODEX_SANDBOX === "seatbelt";
 
-// Local Spring Boot development mode.
-// Enabled by the package.json dev:backend script.
+/*
+ * Local Spring Boot runtime is enabled when:
+ *
+ * 1. BRAINSERVE_LOCAL_BACKEND=1 is explicitly provided, or
+ * 2. The frontend is started in locked mode.
+ *
+ * Both modes must bypass Cloudflare Workerd/Miniflare locally.
+ */
 const useLocalBackendRuntime =
-    process.env.BRAINSERVE_LOCAL_BACKEND === "1";
+    process.env.BRAINSERVE_LOCAL_BACKEND === "1"
+    || process.env.VITE_BRAINSERVE_LOCKED === "1";
 
 const localBindingConfig = {
     main: "./worker/index.ts",
@@ -27,7 +33,8 @@ const localBindingConfig = {
             {
                 binding: d1,
                 database_name: "site-creator-d1",
-                database_id: SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
+                database_id:
+                SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
             },
         ]
         : [],
@@ -45,7 +52,8 @@ const localBindingConfig = {
 export default defineConfig(async () => {
     process.env.WRANGLER_WRITE_LOGS ??= "false";
     process.env.WRANGLER_LOG_PATH ??= ".wrangler/logs";
-    process.env.MINIFLARE_REGISTRY_PATH ??= ".wrangler/registry";
+    process.env.MINIFLARE_REGISTRY_PATH ??=
+        ".wrangler/registry";
 
     const plugins: PluginOption[] = [
         vinext(),
@@ -53,10 +61,11 @@ export default defineConfig(async () => {
     ];
 
     /*
-     * Do not start the Cloudflare workerd runner while using the
-     * local Spring Boot backend.
+     * Cloudflare remains enabled for normal Cloudflare development,
+     * builds and deployments.
      *
-     * Cloudflare remains enabled for normal builds and deployment.
+     * It is disabled when the frontend connects directly to the
+     * local Spring Boot backend.
      */
     if (!useLocalBackendRuntime) {
         const { cloudflare } = await import(
@@ -94,6 +103,8 @@ export default defineConfig(async () => {
                 ]
                 : [
                     "terminal.local",
+                    "localhost",
+                    "127.0.0.1",
                 ],
 
             ...(isCodexSeatbeltSandbox

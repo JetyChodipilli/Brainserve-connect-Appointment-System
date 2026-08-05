@@ -475,7 +475,35 @@ type SpringPage<T> = {
   totalElements?: number;
   totalPages?: number;
   last?: boolean;
+  page?: {
+    number: number;
+    size: number;
+    totalElements: number;
+    totalPages: number;
+  };
 };
+
+function normalizeSpringPage<T>(result: SpringPage<T>): SpringPage<T> {
+  const number = result.number ?? result.page?.number;
+  const size = result.size ?? result.page?.size;
+  const totalElements = result.totalElements ?? result.page?.totalElements;
+  const totalPages = result.totalPages ?? result.page?.totalPages;
+
+  return {
+    ...result,
+    number,
+    size,
+    totalElements,
+    totalPages,
+    last: result.last ?? (number !== undefined && totalPages !== undefined
+        ? number + 1 >= totalPages
+        : undefined),
+  };
+}
+
+async function requestSpringPage<T>(path: string, init: RequestInit = {}): Promise<SpringPage<T>> {
+  return normalizeSpringPage(await apiRequest<SpringPage<T>>(path, init));
+}
 
 export type CountedCursorPage<T> = {
   items: T[];
@@ -489,7 +517,7 @@ async function allSpringPageContent<T>(path: string, pageSize = 200): Promise<{ 
   const content: T[] = [];
   let page = 0;
   while (true) {
-    const result = await apiRequest<SpringPage<T>>(
+    const result = await requestSpringPage<T>(
         `${path}${separator}page=${page}&size=${pageSize}`,
         { cache: "no-store" },
     );
@@ -605,7 +633,7 @@ export const brainServeApi = {
   },
   searchVisitors(query: string, page = 0, size = 25) {
     const params = new URLSearchParams({ query, page: String(page), size: String(size), sort: "name,asc" });
-    return apiRequest<SpringPage<VisitorIdentity>>(`/visitors/search?${params}`, { cache: "no-store" });
+    return requestSpringPage<VisitorIdentity>(`/visitors/search?${params}`, { cache: "no-store" });
   },
   verifyVisitor(id: string) {
     return apiRequest<VisitorIdentity>(`/visitors/${id}/verify`, { method: "POST" });
@@ -743,7 +771,7 @@ export const brainServeApi = {
       departmentId, page: "0", size: "25", sort: "displayName,asc",
     });
     if (query.trim()) params.set("query", query.trim());
-    return apiRequest<SpringPage<PublicDirectoryEmployee>>(`/public/employees?${params}`, { cache: "no-store" });
+    return requestSpringPage<PublicDirectoryEmployee>(`/public/employees?${params}`, { cache: "no-store" });
   },
   publicDepartments() {
     return apiRequest<Array<{ id: string; code: string; name: string; active: boolean; version: number }>>(
@@ -865,7 +893,7 @@ export const brainServeApi = {
     if (filters.query?.trim()) params.set("query", filters.query.trim());
     if (filters.departmentId) params.set("departmentId", filters.departmentId);
     if (filters.status && filters.status !== "All") params.set("status", filters.status);
-    return apiRequest<SpringPage<DepartmentEmployee>>(`/employees?${params}`, { cache: "no-store" });
+    return requestSpringPage<DepartmentEmployee>(`/employees?${params}`, { cache: "no-store" });
   },
   departmentEmployeeSummary() {
     return apiRequest<DepartmentEmployeeSummary[]>("/employees/department-summary");
@@ -906,8 +934,8 @@ export const brainServeApi = {
   operationalRoleCandidates(query = "") {
     const params = new URLSearchParams({ page: "0", size: "100", sort: "fullName,asc" });
     if (query.trim()) params.set("query", query.trim());
-    return apiRequest<SpringPage<{ userId: string; employeeId: string; fullName: string;
-      email: string; role: string; departmentId: string }>>(
+    return requestSpringPage<{ userId: string; employeeId: string; fullName: string;
+      email: string; role: string; departmentId: string }>(
         `/admin/role-transitions/candidates?${params}`, { cache: "no-store" });
   },
   succeedChiefExecutive(currentCeoUserId: string, successorUserId: string,
@@ -945,13 +973,14 @@ export const brainServeApi = {
       teamLeadEmployeeId: string; fullName: string; email: string }>("/team-leads/me/assignment");
   },
   myTeam() {
-    return apiRequest<SpringPage<DepartmentEmployee>>("/team-leads/me/team?page=0&size=50&sort=displayName,asc");
+    return requestSpringPage<DepartmentEmployee>("/team-leads/me/team?page=0&size=50&sort=displayName,asc");
   },
   myTeamLeadWorkspace() {
     return apiRequest<{ assignment: { assignmentId: string; departmentId: string; teamLeadUserId: string;
         teamLeadEmployeeId: string; fullName: string; email: string };
       department: { id: string; code: string; name: string };
-      employees: SpringPage<DepartmentEmployee> }>("/team-leads/me/workspace?page=0&size=50&sort=displayName,asc");
+      employees: SpringPage<DepartmentEmployee> }>("/team-leads/me/workspace?page=0&size=50&sort=displayName,asc")
+        .then((workspace) => ({ ...workspace, employees: normalizeSpringPage(workspace.employees) }));
   },
   createEmployee(payload: unknown) {
     return apiRequest<{ employee: { id: string; employeeNumber: string; displayName: string;
@@ -1038,7 +1067,7 @@ export const brainServeApi = {
     if (filters.query?.trim()) params.set("query", filters.query.trim());
     if (filters.role && filters.role !== "ALL") params.set("role", filters.role);
     if (filters.departmentId) params.set("departmentId", filters.departmentId);
-    return apiRequest<SpringPage<AccountLifecycleAccount>>(
+    return requestSpringPage<AccountLifecycleAccount>(
         `/admin/account-closures/active-accounts?${params}`, { cache: "no-store" });
   },
   archivedAccountPage(filters: { query?: string; page?: number; size?: number } = {}) {
@@ -1047,7 +1076,7 @@ export const brainServeApi = {
       size: String(Math.max(25, Math.min(filters.size ?? 25, 100))),
     });
     if (filters.query?.trim()) params.set("query", filters.query.trim());
-    return apiRequest<SpringPage<ArchivedAccount>>(
+    return requestSpringPage<ArchivedAccount>(
         `/admin/account-closures/archived?${params}`, { cache: "no-store" });
   },
   accountClosureHistory(id: string) {
@@ -1152,7 +1181,7 @@ export const brainServeApi = {
       size: String(Math.max(25, Math.min(filters.size ?? 50, 100))),
     });
     if (filters.query?.trim()) params.set("query", filters.query.trim());
-    return apiRequest<SpringPage<StaffAccount>>(`/admin/staff-accounts?${params}`, { cache: "no-store" });
+    return requestSpringPage<StaffAccount>(`/admin/staff-accounts?${params}`, { cache: "no-store" });
   },
   createStaffAccount(email: string, temporaryPassword: string, role: string) {
     return apiRequest<StaffAccount>("/admin/staff-accounts", {
