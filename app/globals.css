@@ -554,9 +554,9 @@ input::placeholder, textarea::placeholder { color: #ad9da1; }
   place-items: center;
   padding: 32px;
   background:
-    radial-gradient(circle at 15% 15%, rgba(183, 25, 51, .13), transparent 32%),
-    radial-gradient(circle at 85% 80%, rgba(133, 14, 36, .1), transparent 34%),
-    #f8f5f6;
+          radial-gradient(circle at 15% 15%, rgba(183, 25, 51, .13), transparent 32%),
+          radial-gradient(circle at 85% 80%, rgba(133, 14, 36, .1), transparent 34%),
+          #f8f5f6;
 }
 
 .backend-required-card {
@@ -1340,7 +1340,38 @@ input::placeholder, textarea::placeholder { color: #ad9da1; }
 .termination-modal form { display: flex; flex-direction: column; gap: 14px; }
 .termination-modal form > label { color: #513f44; font-size: 10px; font-weight: 800; display: flex; flex-direction: column; gap: 7px; }
 .termination-modal textarea { min-height: 130px; resize: vertical; line-height: 1.55; }
-.visit-modal { width: min(760px, 96vw); }
+.modal.visit-modal {
+  width: min(760px, 96vw);
+  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 40px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.visit-modal > header { flex: 0 0 auto; }
+.visit-modal > form { min-height: 0; padding: 0; display: flex; flex: 1 1 auto; flex-direction: column; }
+.visit-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 22px 26px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-color: #c77a8a #f8ecef;
+  scrollbar-width: thin;
+}
+.visit-modal-body::-webkit-scrollbar { width: 9px; }
+.visit-modal-body::-webkit-scrollbar-track { border-radius: 999px; background: #f8ecef; }
+.visit-modal-body::-webkit-scrollbar-thumb { border: 2px solid #f8ecef; border-radius: 999px; background: #c77a8a; }
+.visit-modal-body::-webkit-scrollbar-thumb:hover { background: var(--red-600); }
+.visit-modal .modal-actions {
+  flex: 0 0 auto;
+  margin-top: 0;
+  padding: 14px 26px 18px;
+  border-top: 1px solid var(--line);
+  background: rgba(255,255,255,.97);
+}
 .approval-chain { display: flex; align-items: center; margin-top: 17px; padding: 12px 14px; border-radius: 12px; background: var(--red-50); border: 1px solid #f1d4da; }
 .approval-chain span { display: inline-flex; align-items: center; gap: 6px; color: var(--red-700); font-size: 9px; font-weight: 700; white-space: nowrap; }
 .approval-chain span.complete { color: #23744a; }

@@ -316,3 +316,92 @@ bash scripts/run-large-data-performance-tests.sh
 ```
 
 Docker Compose enables continuous WAL archiving and daily physical base backups. See `ops/postgres/PITR_RUNBOOK.md` for isolated restore and point-in-time recovery verification.
+
+
+
+
+# BrainServe record visibility and role fix
+
+This package fixes the frontend and Team Lead authorization defects that caused:
+
+- Browser Preview fixture records to appear while the backend was configured.
+- Empty HR Admin, Manager, Team Lead, CEO, and Organization screens.
+- Calls to the nonexistent `/api/v1/departments/visible` endpoint.
+- A single failed department call to cancel the combined employee workspace load.
+- Team Lead `/api/v1/employees` requests to return `403 Forbidden`.
+- System Admin backend state to depend on preview department fixtures.
+
+## Files changed
+
+```text
+app/brainserve-app.tsx
+backend/src/main/java/com/brainserve/appointment/iam/domain/SystemRole.java
+```
+
+## Apply
+
+Extract the ZIP, open PowerShell in the extracted folder, and run:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\apply-fixes.ps1 -ProjectRoot "D:\Brainserve-connect-Appointment-System"
+```
+
+The script creates backups under:
+
+```text
+.local-backups\record-visibility-<timestamp>
+```
+
+## Validate
+
+```powershell
+cd D:\Brainserve-connect-Appointment-System
+
+npm run typecheck
+npm test
+
+cd backend
+mvn clean test
+```
+
+Then restart both applications:
+
+```powershell
+# Backend terminal
+cd D:\Brainserve-connect-Appointment-System\backend
+mvn spring-boot:run
+```
+
+```powershell
+# Frontend terminal
+cd D:\Brainserve-connect-Appointment-System
+npm run dev
+```
+
+Log out and log in again so the Team Lead receives a newly issued JWT containing
+`EMPLOYEE_READ`.
+
+## Diagnose the 20-second login timeout
+
+Run:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\diagnose-local.ps1 -ProjectRoot "D:\Brainserve-connect-Appointment-System"
+```
+
+The timeout is separate from the record-rendering defects. It means the backend
+did not answer before the frontend's 20-second abort. The most common local
+causes after moving secrets to `.env` are:
+
+- `backend/.env` missing.
+- `DB_PASSWORD` still set to `CHANGE_ME`.
+- PostgreSQL not running or the password does not match.
+- Redis not running or its password does not match.
+- Backend port 8080 is occupied by an older Java process.
+- Spring Boot did not finish starting.
+
+Do not increase the frontend timeout to hide a database or backend connection
+failure.
+SSS
