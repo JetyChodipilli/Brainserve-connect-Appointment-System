@@ -89,11 +89,35 @@ public class TeamLeadAssignmentService implements TeamLeadDirectory {
         Optional<DepartmentTeamLeadAssignment> current =
                 assignments.findByDepartmentIdAndActiveTrue(departmentId);
 
+        /*
+         * If this department already points to the same employee, do not return
+         * blindly. Older/inconsistent data can contain an active department
+         * Team Lead assignment while the linked IAM account is still
+         * ROLE_EMPLOYEE. Reconcile the IAM identity first so the user signs in
+         * as ROLE_TEAM_LEAD and receives department-scoped access.
+         */
         if (current.isPresent()
                 && current.get()
                 .getTeamLeadEmployeeId()
                 .equals(employeeId)) {
-            return current.get();
+
+            DepartmentTeamLeadAssignment existing = current.get();
+
+            TeamLeadIdentityService.TeamLeadIdentity identity =
+                    identities.activeByEmployeeId(employeeId)
+                            .orElseGet(() ->
+                                    identities.promoteActiveEmployee(employeeId)
+                            );
+
+            if (!existing.getTeamLeadUserId().equals(identity.userId())) {
+                throw new BusinessException(
+                        "TEAM_LEAD_ASSIGNMENT_IDENTITY_MISMATCH",
+                        "The existing Team Lead assignment is linked to another user account",
+                        HttpStatus.CONFLICT
+                );
+            }
+
+            return existing;
         }
 
         assignments.findByTeamLeadEmployeeIdAndActiveTrue(employeeId)
