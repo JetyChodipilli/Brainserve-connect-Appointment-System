@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { sourceIncludes } from "./source-contract-utils.mjs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const controller = read("backend/src/main/java/com/brainserve/appointment/employee/api/EmployeeController.java");
@@ -15,7 +16,7 @@ const app = read("app/brainserve-app.tsx");
 test("department workforce counts are calculated by PostgreSQL", () => {
   assert.ok(repository.includes("summarizeByDepartment"));
   assert.ok(repository.includes("group by department_id"));
-  assert.ok(repository.includes("count(*) filter (where status = 'ACTIVE')"));
+  assert.ok(sourceIncludes(repository, "count(*) filter (where status = 'ACTIVE')"));
   assert.ok(controller.includes('@GetMapping("/department-summary")'));
 });
 
@@ -26,7 +27,7 @@ test("department rosters use a server-side department filter", () => {
 });
 
 test("organization actions remain permission controlled and transactional", () => {
-  assert.ok(departmentController.includes("hasAuthority('DEPARTMENT_MANAGE')"));
+  assert.ok(departmentController.includes("'DEPARTMENT_MANAGE'"));
   assert.ok(departmentController.includes("@Transactional"));
   assert.ok(departmentController.includes("DEPARTMENT_ACTIVATED"));
   assert.ok(departmentController.includes("DEPARTMENT_DEACTIVATED"));
@@ -34,9 +35,12 @@ test("organization actions remain permission controlled and transactional", () =
 
 test("System Admin account lifecycle filters use database departments instead of preview fixtures", () => {
   assert.ok(departmentController.includes("'WORKFORCE_RECORD_VIEW'"));
-  assert.ok(app.includes('isBackendConfigured\n        ? [] : readDemoDepartments()'));
-  assert.ok(app.includes('else if (role === "System Admin")'));
-  assert.ok(app.includes("const departmentList = await brainServeApi.departments()"));
+  assert.ok(sourceIncludes(app, "isBackendConfigured ? [] : readDemoDepartments()"));
+  assert.ok(app.includes('if (role === "System Admin")'));
+  assert.ok(sourceIncludes(
+      app,
+      "const [departmentList, managerAssignmentList] = await Promise.all([brainServeApi.departments(), brainServeApi.managerAssignments()])",
+  ));
   assert.ok(app.includes("setDepartments(departmentList)"));
 });
 

@@ -1,18 +1,19 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { sourceIncludes } from "./source-contract-utils.mjs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const frontend = read("app/brainserve-app.tsx");
 const account = read("backend/src/main/java/com/brainserve/appointment/iam/domain/UserAccount.java");
 const transition = read(
-  "backend/src/main/java/com/brainserve/appointment/iam/application/OperationalRoleTransitionService.java",
+    "backend/src/main/java/com/brainserve/appointment/iam/application/OperationalRoleTransitionService.java",
 );
 const employees = read(
-  "backend/src/main/java/com/brainserve/appointment/employee/application/EmployeeService.java",
+    "backend/src/main/java/com/brainserve/appointment/employee/application/EmployeeService.java",
 );
 const migration = read(
-  "backend/src/main/resources/db/migration/V43__reconcile_manager_identity_transitions.sql",
+    "backend/src/main/resources/db/migration/V43__reconcile_manager_identity_transitions.sql",
 );
 
 test("a former CEO keeps one identity while becoming an active Manager", () => {
@@ -29,8 +30,8 @@ test("a former CEO keeps one identity while becoming an active Manager", () => {
 test("the employee record and leadership ownership move in the same transaction", () => {
   assert.match(transition, /endConflictingAssignments\(actorUserId, target, targetRole, departmentId\)/);
   assert.match(transition, /employees\.transitionOperationalPosition\(employeeId, departmentId/);
-  assert.match(employees, /employees\.findByIdForUpdate\(employeeId\)/);
-  assert.match(employees, /employee\.transitionOperationalPosition\(departmentId, designation\)/);
+  assert.ok(sourceIncludes(employees, "employees.findByIdForUpdate(employeeId)"));
+  assert.ok(sourceIncludes(employees, "employee.transitionOperationalPosition(departmentId, designation)"));
   assert.match(transition, /case ROLE_MANAGER -> "Department Manager"/);
 });
 

@@ -2653,6 +2653,31 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
 
     const permittedNav = navItems.filter((item) => rolePermissions[role].includes(item.id));
     const currentEmployee = employees.find((employee) => employee.email.toLowerCase() === userEmail.toLowerCase());
+    const activeTeamLeadAssignments = role === "Team Lead"
+        ? teamLeadAssignments.filter((assignment) => assignment.active)
+        : [];
+    const previewTeamLeadAccountId = role === "Team Lead" && !isBackendConfigured
+        ? readDemoAccounts().find((account) => account.email.toLowerCase() === userEmail.toLowerCase())?.id
+        : undefined;
+    const currentTeamLeadAssignment = role === "Team Lead"
+        ? activeTeamLeadAssignments.find((assignment) =>
+            assignment.teamLeadUserId === previewTeamLeadAccountId
+            || assignment.teamLeadEmployeeId === (currentEmployee?.uuid ?? currentEmployee?.id))
+        ?? (activeTeamLeadAssignments.length === 1 ? activeTeamLeadAssignments[0] : undefined)
+        : undefined;
+    /*
+     * A department-scoped directory must be driven by the role assignment,
+     * not only by an email match against the first employee page. A promoted
+     * Team Lead can otherwise have no currentEmployee match (for example after
+     * an email change or when their profile is outside the first 50 records),
+     * which previously made EmployeesView fall back to the full loaded list.
+     */
+    const employeeDirectoryDepartmentId = role === "Team Lead"
+        ? currentTeamLeadAssignment?.departmentId
+        ?? (isBackendConfigured && departments.length === 1 ? departments[0].id : undefined)
+        : role === "HR Admin"
+            ? (isBackendConfigured && departments.length === 1 ? departments[0].id : currentEmployee?.departmentId)
+            : currentEmployee?.departmentId;
     const unassignedEmployeeAccounts = staffAccounts.filter((account) => account.enabled && account.status === "ACTIVE"
         && account.roles.length === 1 && account.roles[0] === "ROLE_EMPLOYEE" && !account.employeeId
         && !employees.some((employee) => employee.email.toLowerCase() === account.email.toLowerCase()));
@@ -3382,6 +3407,7 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
                                                         departments={departments}
                                                         staffAccounts={staffAccounts}
                                                         currentEmployee={currentEmployee}
+                                                        scopedDepartmentId={employeeDirectoryDepartmentId}
                                                         unassignedAccounts={unassignedEmployeeAccounts}
                                                         onAssignDepartment={(account) => { setOperationError(""); setEmployeeAccountId(account.userId); setEmployeeDepartmentId(undefined); setEmployeeModal(true); }}
                                                         onAdd={() => { setOperationError(""); setEmployeeAccountId(undefined); setEmployeeDepartmentId(undefined); setEmployeeModal(true); }} onStatus={changeEmployeeLifecycle} />}
@@ -5795,6 +5821,7 @@ function EmployeesView({
                            departments,
                            staffAccounts,
                            currentEmployee,
+                           scopedDepartmentId,
                            unassignedAccounts,
                            onAssignDepartment,
                            onAdd,
@@ -5805,6 +5832,7 @@ function EmployeesView({
     departments: Department[];
     staffAccounts: StaffAccount[];
     currentEmployee?: Employee;
+    scopedDepartmentId?: string;
     unassignedAccounts: StaffAccount[];
     onAssignDepartment: (account: StaffAccount) => void;
     onAdd: () => void;
@@ -5824,19 +5852,23 @@ function EmployeesView({
     const [busyEmployeeId, setBusyEmployeeId] = useState("");
     const [recordEmployee, setRecordEmployee] = useState<Employee | null>(null);
     const departmentScoped = role === "HR Admin" || role === "Team Lead";
-    const scopedDepartmentId = currentEmployee?.departmentId;
     const loadedEmployees = isBackendConfigured
         ? backendPageEmployees
         : employees;
     const visibleEmployees = useMemo(
         () =>
-            departmentScoped && scopedDepartmentId
-                ? loadedEmployees.filter(
-                    (employee) => employee.departmentId === scopedDepartmentId,
-                )
+            departmentScoped
+                ? scopedDepartmentId
+                    ? loadedEmployees.filter(
+                        (employee) => employee.departmentId === scopedDepartmentId,
+                    )
+                    : []
                 : loadedEmployees,
         [departmentScoped, loadedEmployees, scopedDepartmentId],
     );
+    const scopedDepartmentName = departments.find(
+        (department) => department.id === scopedDepartmentId,
+    )?.name ?? currentEmployee?.department ?? "Assigned department";
     const departmentCount = new Set(
         visibleEmployees.map((employee) => employee.department),
     ).size;
@@ -5858,6 +5890,13 @@ function EmployeesView({
     );
     useEffect(() => {
         if (!isBackendConfigured) return;
+        if (departmentScoped && !scopedDepartmentId) {
+            setBackendPageEmployees([]);
+            setPageCount(1);
+            setTotalElements(0);
+            setPageError("Your account has no active department assignment. Ask HR to repair the Team Lead assignment.");
+            return;
+        }
         let active = true;
         const timer = window.setTimeout(async () => {
             setPageBusy(true);
@@ -6069,7 +6108,7 @@ function EmployeesView({
                         className="scoped-department-label"
                         aria-label="Assigned department"
                     >
-                        {currentEmployee?.department ?? "Assigned department"}
+                        {scopedDepartmentName}
                     </div>
                 ) : (
                     <select

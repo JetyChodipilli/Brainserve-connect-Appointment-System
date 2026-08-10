@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { sourceIncludes } from "./source-contract-utils.mjs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const appointment = read("backend/src/main/java/com/brainserve/appointment/appointment/application/AppointmentService.java");
@@ -33,5 +34,5 @@ test("visitor host rules are enforced by backend and reflected in the form", () 
 test("department HR owns appointment, task and insight queues", () => {
   assert.ok(appointment.includes("departmentHrs.requireForUser(userId).departmentId()"));
   assert.ok(workTask.includes("departmentHrs.requireForUser(userId).departmentId()"));
-  assert.ok(insight.includes("departmentHrs.requireAssignedReviewer(task.getDepartmentId(), hrUserId)"));
+  assert.ok(sourceIncludes(insight, "departmentHrs.requireAssignedReviewer(task.departmentId(), hrUserId)"));
 });

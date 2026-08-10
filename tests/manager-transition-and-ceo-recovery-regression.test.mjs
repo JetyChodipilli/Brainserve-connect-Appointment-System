@@ -1,27 +1,28 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { sourceIncludes } from "./source-contract-utils.mjs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
 const frontend = read("app/brainserve-app.tsx");
 const transition = read(
-  "backend/src/main/java/com/brainserve/appointment/iam/application/OperationalRoleTransitionService.java",
+    "backend/src/main/java/com/brainserve/appointment/iam/application/OperationalRoleTransitionService.java",
 );
 const employeeRepository = read(
-  "backend/src/main/java/com/brainserve/appointment/employee/infrastructure/EmployeeRepository.java",
+    "backend/src/main/java/com/brainserve/appointment/employee/infrastructure/EmployeeRepository.java",
 );
 const employeeService = read(
-  "backend/src/main/java/com/brainserve/appointment/employee/application/EmployeeService.java",
+    "backend/src/main/java/com/brainserve/appointment/employee/application/EmployeeService.java",
 );
 const singleRoleMigration = read(
-  "backend/src/main/resources/db/migration/V39__safe_operational_role_replacement.sql",
+    "backend/src/main/resources/db/migration/V39__safe_operational_role_replacement.sql",
 );
 const exactRoleMigration = read(
-  "backend/src/main/resources/db/migration/V40__close_role_and_manager_routing_gaps.sql",
+    "backend/src/main/resources/db/migration/V40__close_role_and_manager_routing_gaps.sql",
 );
 const managerMigration = read(
-  "backend/src/main/resources/db/migration/V38__single_role_manager_ceo_visit_routing.sql",
+    "backend/src/main/resources/db/migration/V38__single_role_manager_ceo_visit_routing.sql",
 );
 
 test("Team Lead or HR Admin to Manager is one atomic role and department transition", () => {
@@ -34,7 +35,7 @@ test("Team Lead or HR Admin to Manager is one atomic role and department transit
   assert.match(transition, /sessions\.revokeAllForUser\(targetUserId, changedAt\)/);
   assert.match(transition, /ROLE_TRANSITION_SAME_ROLE/);
   assert.match(employeeRepository, /findByIdForUpdate/);
-  assert.match(employeeService, /employees\.findByIdForUpdate\(employeeId\)/);
+  assert.ok(sourceIncludes(employeeService, "employees.findByIdForUpdate(employeeId)"));
   assert.match(singleRoleMigration, /UNIQUE \(user_id\)\s+DEFERRABLE INITIALLY DEFERRED/);
   assert.match(exactRoleMigration, /ck_iam_user_exactly_one_role/);
 });
@@ -42,7 +43,8 @@ test("Team Lead or HR Admin to Manager is one atomic role and department transit
 test("only one active Manager can own a department", () => {
   assert.match(managerMigration, /uq_active_manager_per_department/);
   assert.match(managerMigration, /ON department_manager_assignment\(department_id\) WHERE active/);
-  assert.match(transition, /case ROLE_MANAGER -> managers\.findByDepartmentIdAndActiveTrue\(departmentId\)/);
+  assert.ok(sourceIncludes(transition, "case ROLE_MANAGER -> managers.activeForDepartment(departmentId)"));
+  assert.ok(sourceIncludes(transition, "!value.managerUserId().equals(targetUserId)"));
   assert.match(frontend, /currentManagers\.some\(\(item\) => item\.active && item\.departmentId === departmentId/);
   assert.match(frontend, /The selected department already has an active/);
 });

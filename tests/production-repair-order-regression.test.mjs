@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { sourceIncludes } from "./source-contract-utils.mjs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -9,7 +10,10 @@ test("hosted browser preview is available without a backend and explicit lock mo
   const api = read("app/lib/api.ts");
   const app = read("app/brainserve-app.tsx");
   const frontendImage = read("Dockerfile.frontend");
-  assert.match(page, /const backendConfigured = Boolean\(process\.env\.NEXT_PUBLIC_API_BASE_URL\?\.trim\(\)\)/);
+  assert.ok(sourceIncludes(
+      page,
+      "const backendConfigured = Boolean(process.env.NEXT_PUBLIC_API_BASE_URL?.trim())",
+  ));
   assert.match(page, /!backendConfigured/);
   assert.match(page, /process\.env\.NEXT_PUBLIC_BROWSER_PREVIEW !== "false"/);
   assert.match(page, /import\.meta\.env\.VITE_BRAINSERVE_LOCKED !== "1"/);

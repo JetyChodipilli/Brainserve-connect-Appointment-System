@@ -15,8 +15,12 @@ import java.util.UUID;
 public interface AppointmentRepository extends JpaRepository<Appointment, UUID> {
     Optional<Appointment> findByReferenceNumber(String referenceNumber);
     Optional<Appointment> findByIdempotencyKey(String idempotencyKey);
-    boolean existsByHostEmployeeIdAndSlotStartAndStatusIn(UUID hostEmployeeId, Instant slotStart,
-                                                           Collection<AppointmentStatus> statuses);
+    boolean existsByHostEmployeeIdAndSlotStartLessThanAndSlotEndGreaterThanAndStatusIn(
+            UUID hostEmployeeId,
+            Instant candidateSlotEnd,
+            Instant candidateSlotStart,
+            Collection<AppointmentStatus> statuses
+    );
     Page<Appointment> findByHostEmployeeId(UUID hostEmployeeId, Pageable pageable);
     Page<Appointment> findByHostEmployeeIdAndSlotStartGreaterThanEqualAndSlotStartLessThan(
             UUID hostEmployeeId, Instant from, Instant to, Pageable pageable);

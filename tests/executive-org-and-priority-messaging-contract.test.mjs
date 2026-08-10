@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { sourceIncludes } from "./source-contract-utils.mjs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const employeeController = read("backend/src/main/java/com/brainserve/appointment/employee/api/EmployeeController.java");
@@ -17,8 +18,8 @@ test("CEO can register or move their own profile to any active department", () =
   assert.ok(employeeController.includes('@PutMapping("/me/executive-profile")'));
   assert.ok(employeeController.includes("hasRole('CEO')"));
   assert.ok(employeeService.includes("upsertExecutiveProfile"));
-  assert.ok(employeeService.includes("appointmentHosts.linkEmployee(actorUserId, employee.getId())"));
-  assert.ok(employeeService.includes("employee.transferDepartment(department.id())"));
+  assert.ok(sourceIncludes(employeeService, "appointmentHosts.linkEmployee(actorUserId, employee.getId())"));
+  assert.ok(sourceIncludes(employeeService, "employee.transferDepartment(department.id())"));
   assert.ok(app.includes("MY EXECUTIVE DEPARTMENT"));
   assert.ok(app.includes("Create and register this as my CEO department"));
 });

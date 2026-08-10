@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { sourceIncludes } from "./source-contract-utils.mjs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const service = read("backend/src/main/java/com/brainserve/appointment/workinsight/application/WorkInsightService.java");
@@ -15,8 +16,8 @@ const api = read("app/lib/api.ts");
 const app = read("app/brainserve-app.tsx");
 
 test("Team Lead workspace fetches assignment, department and roster atomically", () => {
-  assert.ok(teamLead.includes("public Workspace workspace(UUID teamLeadUserId, Pageable pageable)"));
-  assert.ok(teamLead.includes("employees.departmentMembers(assignment.departmentId(), pageable)"));
+  assert.ok(sourceIncludes(teamLead, "public Workspace workspace(UUID teamLeadUserId, Pageable pageable)"));
+  assert.ok(sourceIncludes(teamLead, "employees.departmentMembers(assignment.departmentId(), pageable)"));
   assert.ok(teamLeadController.includes("requireBoundedPage(pageable)"));
   assert.ok(teamLeadController.includes('@GetMapping("/me/workspace")'));
   assert.ok(api.includes("myTeamLeadWorkspace"));

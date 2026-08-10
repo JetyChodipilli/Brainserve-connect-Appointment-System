@@ -10,13 +10,23 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.authorization.AuthorizationDeniedException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.bind.ServletRequestBindingException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 import java.io.IOException;
 import java.net.URI;
@@ -98,6 +108,143 @@ public class GlobalExceptionHandler {
                         + "' has an invalid value",
                 request,
                 errors
+        );
+    }
+
+    /**
+     * Preserves statuses deliberately raised by controllers. Without this
+     * handler, the catch-all below converts ResponseStatusException to 500.
+     */
+    @ExceptionHandler(ResponseStatusException.class)
+    public ProblemDetail responseStatus(
+            ResponseStatusException ex,
+            HttpServletRequest request
+    ) {
+        HttpStatus status = HttpStatus.resolve(ex.getStatusCode().value());
+
+        if (status == null) {
+            log.error(
+                    "Unsupported HTTP status correlationId={} path={} status={}",
+                    correlationId(),
+                    request.getRequestURI(),
+                    ex.getStatusCode().value(),
+                    ex
+            );
+            return problem(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "INTERNAL_ERROR",
+                    "The request could not be completed",
+                    request,
+                    null
+            );
+        }
+
+        String detail = ex.getReason() == null || ex.getReason().isBlank()
+                ? status.getReasonPhrase()
+                : ex.getReason();
+
+        return problem(
+                status,
+                "HTTP_" + status.value(),
+                detail,
+                request,
+                null
+        );
+    }
+
+    /**
+     * Handles invalid JSON and missing required request values. Controller
+     * method validation is a ResponseStatusException and is handled above so
+     * return-value validation can retain its server-error status.
+     */
+    @ExceptionHandler({
+            HttpMessageNotReadableException.class,
+            ServletRequestBindingException.class,
+            MissingServletRequestPartException.class
+    })
+    public ProblemDetail invalidRequest(
+            Exception ex,
+            HttpServletRequest request
+    ) {
+        return problem(
+                HttpStatus.BAD_REQUEST,
+                "INVALID_REQUEST",
+                "The request is missing a required value or contains invalid data",
+                request,
+                null
+        );
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ProblemDetail payloadTooLarge(
+            MaxUploadSizeExceededException ex,
+            HttpServletRequest request
+    ) {
+        return problem(
+                HttpStatus.PAYLOAD_TOO_LARGE,
+                "PAYLOAD_TOO_LARGE",
+                "The uploaded file exceeds the configured size limit",
+                request,
+                null
+        );
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ProblemDetail methodNotAllowed(
+            HttpRequestMethodNotSupportedException ex,
+            HttpServletRequest request
+    ) {
+        return problem(
+                HttpStatus.METHOD_NOT_ALLOWED,
+                "METHOD_NOT_ALLOWED",
+                "The HTTP method is not supported for this endpoint",
+                request,
+                null
+        );
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ProblemDetail mediaTypeNotSupported(
+            HttpMediaTypeNotSupportedException ex,
+            HttpServletRequest request
+    ) {
+        return problem(
+                HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+                "UNSUPPORTED_MEDIA_TYPE",
+                "The request content type is not supported",
+                request,
+                null
+        );
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotAcceptableException.class)
+    public ProblemDetail mediaTypeNotAcceptable(
+            HttpMediaTypeNotAcceptableException ex,
+            HttpServletRequest request
+    ) {
+        return problem(
+                HttpStatus.NOT_ACCEPTABLE,
+                "NOT_ACCEPTABLE",
+                "The requested response content type is not available",
+                request,
+                null
+        );
+    }
+
+    @ExceptionHandler({
+            NoHandlerFoundException.class,
+            NoResourceFoundException.class
+    })
+    public ProblemDetail resourceNotFound(
+            Exception ex,
+            HttpServletRequest request
+    ) {
+        return problem(
+                HttpStatus.NOT_FOUND,
+                "RESOURCE_NOT_FOUND",
+                "The requested resource was not found",
+                request,
+                null
         );
     }
 

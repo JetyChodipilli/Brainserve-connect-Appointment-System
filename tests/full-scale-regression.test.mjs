@@ -1,18 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { sourceIncludes } from "./source-contract-utils.mjs";
 
 const read = (path) => readFileSync(path, "utf8");
 const api = read("app/lib/api.ts");
 const appointments = read("app/lib/appointments.ts");
 const notifications = read(
-  "backend/src/main/java/com/brainserve/appointment/notification/application/InternalCallNotificationService.java",
+    "backend/src/main/java/com/brainserve/appointment/notification/application/InternalCallNotificationService.java",
 );
 const insights = read(
-  "backend/src/main/java/com/brainserve/appointment/workinsight/application/WorkInsightService.java",
+    "backend/src/main/java/com/brainserve/appointment/workinsight/application/WorkInsightService.java",
 );
 const history = read(
-  "backend/src/main/java/com/brainserve/appointment/reporting/application/RoleAwareHistoryQueryService.java",
+    "backend/src/main/java/com/brainserve/appointment/reporting/application/RoleAwareHistoryQueryService.java",
 );
 
 test("large administrative lists use bounded database-backed pages", () => {
@@ -32,7 +33,7 @@ test("office-day behavior is configurable across frontend and backend services",
   assert.match(notifications, /ZonedDateTime\.now\(officeZone\)/);
   assert.match(insights, /brainserve\.appointment\.office-zone/);
   assert.match(insights, /LocalDate\.now\(officeZone\)/);
-  assert.match(history, /addValue\("officeZone", officeZone\)/);
+  assert.ok(sourceIncludes(history, 'addValue("officeZone", officeZone, Types.VARCHAR)'));
   assert.match(history, /AT TIME ZONE :officeZone/);
   assert.doesNotMatch(notifications, /static final ZoneId OFFICE_ZONE/);
   assert.doesNotMatch(insights, /static final ZoneId OFFICE_ZONE/);

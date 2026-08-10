@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { sourceIncludes } from "./source-contract-utils.mjs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const role = read("backend/src/main/java/com/brainserve/appointment/iam/domain/SystemRole.java");
@@ -45,8 +46,9 @@ test("HR manages assignments while CEO has read-only visibility", () => {
 test("Team Lead access is a visible HR promotion flow, not an unscoped staff registration", () => {
   assert.ok(frontend.includes("Promote an approved employee"));
   assert.ok(frontend.includes("Their existing login credentials remain unchanged"));
-  assert.ok(frontend.includes('const allowedRoles = [["ROLE_EMPLOYEE"'));
-  assert.ok(!frontend.includes('const allowedRoles = [["ROLE_TEAM_LEAD"'));
+  assert.ok(sourceIncludes(frontend, 'const allowedRoles = [["ROLE_RECEPTIONIST", "Receptionist"], ["ROLE_SECURITY", "Security"]]'));
+  assert.ok(!sourceIncludes(frontend, 'const allowedRoles = [["ROLE_EMPLOYEE"'));
+  assert.ok(!sourceIncludes(frontend, 'const allowedRoles = [["ROLE_TEAM_LEAD"'));
   assert.ok(frontend.includes('["ROLE_TEAM_LEAD", "ROLE_EMPLOYEE", "ROLE_RECEPTIONIST", "ROLE_SECURITY"]'));
   assert.ok(frontend.includes("Receptionist and Security accounts are never eligible"));
   assert.ok(frontend.includes("Employees only — Security and Receptionist are excluded"));

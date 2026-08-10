@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { sourceIncludes } from "./source-contract-utils.mjs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const employeeRepository = read("backend/src/main/java/com/brainserve/appointment/employee/infrastructure/EmployeeRepository.java");
@@ -23,7 +24,10 @@ test("employee search is performed in PostgreSQL across name, employee ID and em
   assert.match(employeeRepository, /lower\(employee\.displayName\).*like/s);
   assert.match(employeeRepository, /lower\(employee\.employeeNumber\).*concat\(:query, '%'\)/s);
   assert.match(employeeRepository, /lower\(employee\.officialEmail\).*concat\(:query, '%'\)/s);
-  assert.match(employeeService, /return employees\.search\(departmentId, status, normalizedQuery, pageable\)/);
+  assert.ok(sourceIncludes(
+      employeeService,
+      "return employees.search(departmentId, status, hasQuery, normalizedQuery, pageable)",
+  ));
 });
 
 test("department and Team Lead directories use bounded pages", () => {
@@ -52,7 +56,10 @@ test("HR account and permission actions fail closed outside the assigned departm
   assert.match(permissionAdministration, /PERMISSION_TARGET_DEPARTMENT_SCOPE_DENIED/);
   assert.match(permissionAdministration, /target\.getRoles\(\)\.isEmpty\(\) \|\| !lowerRoles\.containsAll/);
   assert.match(teamLeadService, /TEAM_LEAD_ASSIGNMENT_DEPARTMENT_SCOPE_DENIED/);
-  assert.match(teamLeadService, /departmentHrs\.requireForUser\(actorUserId\)\.departmentId\(\)\.equals\(departmentId\)/);
+  assert.ok(sourceIncludes(
+      teamLeadService,
+      "departmentHrs.requireForUser(actorUserId).departmentId().equals(departmentId)",
+  ));
   assert.match(api, /staffAccountPage\(filters:/);
   assert.match(ui, /managedAccountTotalPages/);
 });
@@ -62,7 +69,7 @@ test("public recovery persistence is committed before secondary audit work", () 
   assert.match(recovery, /requestWriter\.createIfAbsent/);
   assert.match(recovery, /catch \(RuntimeException auditFailure\)/);
   assert.match(recoveryWriter,
-    /@Transactional\(propagation = Propagation\.REQUIRES_NEW\)\s+public Optional<UUID> createIfAbsent/);
+      /@Transactional\(propagation = Propagation\.REQUIRES_NEW\)\s+public Optional<UUID> createIfAbsent/);
   assert.match(recoveryWriter, /saveAndFlush\(new AccountRecoveryRequest/);
 });
 

@@ -566,8 +566,9 @@ public class AppointmentService implements AppointmentAvailability, AppointmentA
 
     @Override
     @Transactional(readOnly = true)
-    public boolean isSlotReserved(UUID hostEmployeeId, Instant slotStart) {
-        return appointments.existsByHostEmployeeIdAndSlotStartAndStatusIn(hostEmployeeId, slotStart,
+    public boolean isSlotReserved(UUID hostEmployeeId, Instant slotStart, Instant slotEnd) {
+        return appointments.existsByHostEmployeeIdAndSlotStartLessThanAndSlotEndGreaterThanAndStatusIn(
+                hostEmployeeId, slotEnd, slotStart,
                 java.util.EnumSet.of(AppointmentStatus.PENDING_VERIFICATION, AppointmentStatus.PENDING_SECURITY_INTAKE,
                         AppointmentStatus.PENDING_RECEPTION_VERIFICATION, AppointmentStatus.PENDING_APPROVAL,
                         AppointmentStatus.PENDING_HR_APPROVAL, AppointmentStatus.PENDING_TEAM_LEAD_APPROVAL,

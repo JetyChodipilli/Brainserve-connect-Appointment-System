@@ -74,8 +74,9 @@ public class AvailabilityController {
         ZonedDateTime end = ZonedDateTime.of(date, LocalTime.of(17, 30), officeZone);
         while (cursor.plusMinutes(effectiveSlotMinutes).compareTo(end) <= 0) {
             Instant start = cursor.toInstant();
-            if (start.isAfter(earliestStart) && !appointments.isSlotReserved(employeeId, start))
-                slots.add(new AvailableSlot(start, cursor.plusMinutes(effectiveSlotMinutes).toInstant(), officeZone.getId()));
+            Instant finish = cursor.plusMinutes(effectiveSlotMinutes).toInstant();
+            if (start.isAfter(earliestStart) && !appointments.isSlotReserved(employeeId, start, finish))
+                slots.add(new AvailableSlot(start, finish, officeZone.getId()));
             cursor = cursor.plusMinutes(effectiveSlotMinutes + 10L);
         }
         return slots;

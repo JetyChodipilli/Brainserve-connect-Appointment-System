@@ -53,7 +53,11 @@ test("the complete role menu remains reachable in short viewports", () => {
 });
 
 test("Reception can send internal calls after receiving leadership messages", () => {
-  assert.ok(roles.includes("INTERNAL_NOTIFICATION_READ, INTERNAL_NOTIFICATION_SEND"));
+  const receptionPermissions = roles.match(
+      /ROLE_RECEPTIONIST\(EnumSet\.of\(([\s\S]*?)\)\),/,
+  )?.[1] ?? "";
+  assert.ok(receptionPermissions.includes("INTERNAL_NOTIFICATION_READ"));
+  assert.ok(receptionPermissions.includes("INTERNAL_NOTIFICATION_SEND"));
   assert.ok(app.includes("Acknowledged. Reception will coordinate this."));
   assert.ok(!app.includes("Receptionist</strong><ChevronRight size={14} />Receive only"));
 });
