@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { sourceIncludes } from "./source-contract-utils.mjs";
 
 const service = readFileSync(
     new URL("../backend/src/main/java/com/brainserve/appointment/employee/application/EmployeeService.java", import.meta.url),
@@ -27,8 +26,8 @@ test("HR and Team Lead employee lists are derived from their assigned department
 
     assert.ok(hrScope >= 0);
     assert.ok(teamLeadScope > hrScope);
-    assert.ok(sourceIncludes(service, "departmentHrs.requireForUser(actorUserId).departmentId()"));
-    assert.ok(sourceIncludes(service, "teamLeads.requireForUser(actorUserId).departmentId()"));
+    assert.match(service, /departmentHrs\s*\.requireForUser\(actorUserId\)\s*\.departmentId\(\)/);
+    assert.match(service, /teamLeads\s*\.requireForUser\(actorUserId\)\s*\.departmentId\(\)/);
     assert.match(service, /EMPLOYEE_DEPARTMENT_SCOPE_DENIED/);
 });
 
@@ -42,21 +41,25 @@ test("employee read and lifecycle endpoints pass the authenticated actor into sc
 test("department-scoped employee UI removes the company-wide department selector", () => {
     assert.match(ui, /const departmentScoped = role === "HR Admin" \|\| role === "Team Lead"/);
     assert.match(ui, /loadedEmployees\.filter\(\s*\(employee\) => employee\.departmentId === scopedDepartmentId/);
+    assert.match(ui, /departmentScoped\s*\?\s*scopedDepartmentId[\s\S]*?: \[\][\s\S]*?: loadedEmployees/);
+    assert.match(ui, /if \(departmentScoped && !scopedDepartmentId\)[\s\S]*?setBackendPageEmployees\(\[\]\)[\s\S]*?setTotalElements\(0\)/);
+    assert.match(ui, /Your Team Lead department assignment could not be resolved/);
     assert.match(ui, /departmentId: selectedDepartment/);
     assert.match(ui, /departmentScoped \?[\s\S]*scoped-department-label[\s\S]*All departments/);
+    assert.match(ui, /<small>\{role\} · \{userEmail\}<\/small>/);
 });
 
 test("a CEO department profile is visible to HR but protected from lifecycle actions", () => {
-    assert.ok(sourceIncludes(service, "requireLifecycleAuthority(actorUserId, employee)"));
+    assert.match(service, /requireLifecycleAuthority\(\s*actorUserId,\s*employee\s*\)/);
     assert.match(service, /public boolean isChiefExecutive\(UUID employeeId\)/);
     assert.match(service, /public Set<UUID> chiefExecutiveEmployeeIds\(\)/);
-    assert.ok(sourceIncludes(service, 'staff.activeWithAnyRole(Set.of("ROLE_CEO"))'));
-    assert.ok(sourceIncludes(service, "findByOfficialEmailIgnoreCase(account.email())"));
+    assert.match(service, /staff\.activeWithAnyRole\(Set\.of\("ROLE_CEO"\)\)/);
+    assert.match(service, /findByOfficialEmailIgnoreCase\(\s*account\.email\(\)\s*\)/);
     assert.match(service, /CEO_LIFECYCLE_PROTECTED/);
-    assert.ok(sourceIncludes(service, 'rejectedSecurityAudit.record("CEO_LIFECYCLE_CHANGE_BLOCKED"'));
+    assert.match(service, /rejectedSecurityAudit\.record\(\s*"CEO_LIFECYCLE_CHANGE_BLOCKED"/);
     assert.match(controller, /boolean lifecycleProtected/);
-    assert.ok(sourceIncludes(controller, "lifecycleProtectedEmployeeIds.contains(value.getId())"));
-    assert.ok(sourceIncludes(termination, "employees.isChiefExecutive(employeeId)"));
+    assert.match(controller, /lifecycleProtectedEmployeeIds\.contains\(value\.getId\(\)\)/);
+    assert.match(termination, /employees\.isChiefExecutive\(employeeId\)/);
     assert.match(ui, /item\.lifecycleProtected/);
     assert.match(ui, /!isCompanyExecutive && transitions\(item\.status\)\.length/);
     assert.match(ui, /Company-wide authority · System Admin managed/);
