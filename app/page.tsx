@@ -1,9 +1,5 @@
 import BrainServeApp from "./brainserve-app";
-import {
-  Database,
-  LockKeyhole,
-  ShieldAlert,
-} from "lucide-react";
+import { Database, LockKeyhole, ShieldAlert } from "lucide-react";
 
 export default function Home() {
   const backendConfigured = Boolean(
@@ -12,7 +8,7 @@ export default function Home() {
 
   const browserPreviewEnabled =
       !backendConfigured &&
-      process.env.NEXT_PUBLIC_BROWSER_PREVIEW !== "false" &&
+      process.env.NEXT_PUBLIC_BROWSER_PREVIEW === "true" &&
       import.meta.env.VITE_BRAINSERVE_LOCKED !== "1";
 
   if (!backendConfigured && !browserPreviewEnabled) {
@@ -67,9 +63,5 @@ export default function Home() {
     );
   }
 
-  return (
-      <BrainServeApp
-          browserPreviewEnabled={browserPreviewEnabled}
-      />
-  );
+  return <BrainServeApp browserPreviewEnabled={browserPreviewEnabled} />;
 }

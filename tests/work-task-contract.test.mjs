@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { sourceIncludes } from "./source-contract-utils.mjs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const domain = read("backend/src/main/java/com/brainserve/appointment/worktask/domain/DepartmentWorkTask.java");
@@ -43,9 +42,9 @@ test("demo organization and Team Lead scope persist across login sessions", () =
   assert.ok(app.includes('writeDemoTeamLeadAssignments(updated)'));
   assert.ok(app.includes('assignedByUserId: "demo-legacy-migration"'));
   assert.ok(app.includes('if (migrated) writeDemoTeamLeadAssignments(assignments)'));
-  assert.ok(sourceIncludes(app, "isBackendConfigured ? [] : readDemoEmployees()"));
-  assert.ok(sourceIncludes(app, "isBackendConfigured ? [] : readDemoDepartments()"));
-  assert.ok(sourceIncludes(app, "isBackendConfigured ? [] : readDemoTeamLeadAssignments()"));
+  assert.ok(app.includes('isBackendConfigured ? [] : readDemoEmployees()'));
+  assert.ok(app.includes('isBackendConfigured\n        ? [] : readDemoDepartments()'));
+  assert.ok(app.includes('isBackendConfigured\n        ? [] : readDemoTeamLeadAssignments()'));
 });
 
 test("work tasks follow the employee and Team Lead verification state machine", () => {

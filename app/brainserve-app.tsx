@@ -1005,6 +1005,12 @@ function roleFromAuthority(authority: string): Role | null {
     return roleMap[authority] ?? null;
 }
 
+const ROLE_AUTHORITY_BY_LABEL: Record<Role, string> = {
+    "HR Admin": "ROLE_HR_ADMIN", Manager: "ROLE_MANAGER", "Team Lead": "ROLE_TEAM_LEAD",
+    CEO: "ROLE_CEO", Employee: "ROLE_EMPLOYEE", Reception: "ROLE_RECEPTIONIST", Security: "ROLE_SECURITY",
+    "System Admin": "ROLE_SYSTEM_ADMIN",
+};
+
 const SUPPORTED_ROLE_AUTHORITIES = [
     "ROLE_SYSTEM_ADMIN",
     "ROLE_CEO",
@@ -1356,9 +1362,12 @@ function StatusPill({ status }: {
 
 function Welcome({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
     const featuredDate = dateCard(officeToday());
-    const [profile, setProfile] = useState<CompanyProfile>({ name: "BrainServe Connect", emailDomain: "brainserve.in",
-        hqAddress: "Hyderabad, Telangana, India", supportEmail: "support@brainserve.in", consentVersion: "2026.1" });
-    const [leadership, setLeadership] = useState({ ceo: "Chief Executive Officer", hr: "HR Admin" });
+    const [profile, setProfile] = useState<CompanyProfile>(() => isBackendConfigured
+        ? { name: "", emailDomain: "", hqAddress: "", supportEmail: "", consentVersion: "" }
+        : { name: "BrainServe Connect", emailDomain: "brainserve.in", hqAddress: "Hyderabad, Telangana, India",
+            supportEmail: "support@brainserve.in", consentVersion: "2026.1" });
+    const [leadership, setLeadership] = useState(() => isBackendConfigured
+        ? { ceo: "", hr: "" } : { ceo: "Chief Executive Officer", hr: "HR Admin" });
     useEffect(() => {
         if (!isBackendConfigured) return;
         let active = true;
@@ -1382,9 +1391,9 @@ function Welcome({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
             </header>
 
             <section className="welcome-hero">
-                <div className="eyebrow"><Sparkles size={14} /> Welcome to {profile.name}</div>
+                <div className="eyebrow"><Sparkles size={14} /> Welcome to {profile.name || "your organization"}</div>
                 <h1>A thoughtful welcome,<br /><span>before you arrive.</span></h1>
-                <p>Book a secure appointment with our employees, HR team or leadership at {profile.hqAddress}. We’ll guide your visit from approval to check-out.</p>
+                <p>Book a secure appointment with our employees, HR team or leadership at {profile.hqAddress || "our office"}. We’ll guide your visit from approval to check-out.</p>
                 <div className="hero-actions">
                     <button className="button button-primary button-large" onClick={() => onNavigate("book")}>Book an appointment <ArrowRight size={18} /></button>
                     <button className="button button-secondary button-large" onClick={() => onNavigate("track")}><Search size={18} /> Track your visit</button>
@@ -1401,7 +1410,7 @@ function Welcome({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
                 <div className="mini-date"><strong>{featuredDate.date}</strong><span>{featuredDate.month.toUpperCase()}<br />TODAY</span></div>
                 <div className="arrival-details">
                     <span>Appointment with</span>
-                    <strong>{leadership.ceo}</strong>
+                    <strong>{leadership.ceo || "Leadership"}</strong>
                     <small>Leadership visit · coordinated through Reception</small>
                 </div>
                 <div className="arrival-timeline"><span className="done" /><i /><span className="done" /><i /><span /></div>
@@ -1425,7 +1434,9 @@ function BookingFlow({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
     const dates = useMemo(() => appointmentDates(8, visitType === "Emergency visit"), [visitType]);
     const [visitDate, setVisitDate] = useState(() => appointmentDates(8, false)[0]);
     const [hosts, setHosts] = useState<PublicHost[]>([]);
-    const [publicDepartments, setPublicDepartments] = useState<Department[]>(initialDepartments);
+    const [publicDepartments, setPublicDepartments] = useState<Department[]>(() =>
+        isBackendConfigured ? [] : initialDepartments,
+    );
     const [hostId, setHostId] = useState("");
     const [routingDepartmentId, setRoutingDepartmentId] = useState("");
     const [requestedEmployeeId, setRequestedEmployeeId] = useState("");
@@ -1435,7 +1446,7 @@ function BookingFlow({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
     const [slots, setSlots] = useState<AvailableSlot[]>([]);
     const [slot, setSlot] = useState<AvailableSlot | null>(null);
     const [visitor, setVisitor] = useState({ name: "", email: "", phone: "", company: "", purpose: "" });
-    const [consentVersion, setConsentVersion] = useState("2026.1");
+    const [consentVersion, setConsentVersion] = useState(() => isBackendConfigured ? "" : "2026.1");
     const [consent, setConsent] = useState(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
@@ -1615,7 +1626,7 @@ function BookingFlow({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
                 writeDemoAppointments([...readDemoAppointments(), demoResult]);
                 result = demoResult;
             }
-            window.localStorage.setItem(DEMO_LAST_REFERENCE_KEY, result.referenceNumber);
+            if (!isBackendConfigured) window.localStorage.setItem(DEMO_LAST_REFERENCE_KEY, result.referenceNumber);
             setSubmission(result);
         } catch (reason) {
             setError(reason instanceof ApiError ? reason.message : "Your appointment request could not be submitted.");
@@ -1722,7 +1733,8 @@ function BookingFlow({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
 }
 
 function TrackAppointment({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
-    const [reference, setReference] = useState(() => typeof window === "undefined" ? "" : window.localStorage.getItem(DEMO_LAST_REFERENCE_KEY) ?? "");
+    const [reference, setReference] = useState(() => isBackendConfigured || typeof window === "undefined"
+        ? "" : window.localStorage.getItem(DEMO_LAST_REFERENCE_KEY) ?? "");
     const [result, setResult] = useState<PublicAppointment | null>(null);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
@@ -2154,27 +2166,31 @@ function mergeDemoStaffAccounts(current: StaffAccount[]) {
 function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: string; onLogout: () => void | Promise<void> }) {
     const [view, setView] = useState<View>("overview");
     const [appointments, setAppointments] = useState(() => isBackendConfigured
-        ? initialAppointments : readPreviewWorkspaceAppointments());
-    const [employees, setEmployees] = useState(() => isBackendConfigured ? initialEmployees : readDemoEmployees());
+        ? [] : readPreviewWorkspaceAppointments());
+    const [employees, setEmployees] = useState<Employee[]>(() => isBackendConfigured ? [] : readDemoEmployees());
     const [appointmentHosts, setAppointmentHosts] = useState<Employee[]>([]);
-    const [staffAccounts, setStaffAccounts] = useState(() => isBackendConfigured
-        ? initialStaffAccounts : mergeDemoStaffAccounts(initialStaffAccounts));
+    const [staffAccounts, setStaffAccounts] = useState<StaffAccount[]>(() => isBackendConfigured
+        ? [] : mergeDemoStaffAccounts(initialStaffAccounts));
     const [departments, setDepartments] = useState<Department[]>(() => isBackendConfigured
-        ? initialDepartments : readDemoDepartments());
+        ? [] : readDemoDepartments());
     const [departmentSummaries, setDepartmentSummaries] = useState<DepartmentEmployeeSummary[]>([]);
     const [teamLeadAssignments, setTeamLeadAssignments] = useState<TeamLeadAssignment[]>(() => isBackendConfigured
-        ? initialTeamLeadAssignments : readDemoTeamLeadAssignments());
+        ? [] : readDemoTeamLeadAssignments());
     const [departmentHrAssignments, setDepartmentHrAssignments] = useState<DepartmentHrAssignment[]>(() => isBackendConfigured
-        ? initialDepartmentHrAssignments : readDemoDepartmentHrAssignments());
+        ? [] : readDemoDepartmentHrAssignments());
     const [managerAssignments, setManagerAssignments] = useState<ManagerAssignment[]>(() => isBackendConfigured
-        ? initialManagerAssignments : readDemoManagerAssignments());
-    const [metrics, setMetrics] = useState<DashboardMetrics>({
+        ? [] : readDemoManagerAssignments());
+    const [metrics, setMetrics] = useState<DashboardMetrics>(() => isBackendConfigured ? {
+        awaitingApproval: 0, activeVisits: 0, visitorsInside: 0, totalEmployees: 0, activeEmployees: 0,
+    } : {
         awaitingApproval: initialAppointments.filter((item) => ["Pending", "Awaiting Security", "Awaiting Reception", "Awaiting HR", "Awaiting Team Lead", "Awaiting Manager", "Awaiting CEO"].includes(item.status)).length,
         activeVisits: initialAppointments.filter((item) => ["Approved", "Checked in"].includes(item.status)).length,
         visitorsInside: initialAppointments.filter((item) => item.status === "Checked in").length,
         totalEmployees: initialEmployees.length, activeEmployees: initialEmployees.filter((item) => item.status === "Active").length,
     });
-    const [accessRecords, setAccessRecords] = useState<AccessRecord[]>(initialAccessRecords);
+    const [accessRecords, setAccessRecords] = useState<AccessRecord[]>(() =>
+        isBackendConfigured ? [] : initialAccessRecords,
+    );
     const [employeeModal, setEmployeeModal] = useState(false);
     const [terminationEmployee, setTerminationEmployee] = useState<Employee | null>(null);
     const [employeeDepartmentId, setEmployeeDepartmentId] = useState<string>();
@@ -2195,9 +2211,11 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
     const [workspaceRevision, setWorkspaceRevision] = useState(0);
     const [liveState, setLiveState] = useState<RealtimeConnectionState>(isBackendConfigured ? "connecting" : "offline");
     const [lastLiveUpdate, setLastLiveUpdate] = useState<Date | null>(null);
-    const [profilePhotoUrl, setProfilePhotoUrl] = useState<string | null>(() => typeof window === "undefined" ? null
-        : window.localStorage.getItem(`brainserve.demo.profile.photo.${userEmail.toLowerCase()}`));
-    const [profileName, setProfileName] = useState(() => readDemoAccounts()
+    const [profilePhotoUrl, setProfilePhotoUrl] = useState<string | null>(() =>
+        isBackendConfigured || typeof window === "undefined" ? null
+            : window.localStorage.getItem(`brainserve.demo.profile.photo.${userEmail.toLowerCase()}`),
+    );
+    const [profileName, setProfileName] = useState(() => isBackendConfigured ? role : readDemoAccounts()
         .find((account) => account.email.toLowerCase() === userEmail.toLowerCase())?.fullName ?? role);
     const handleProfileUpdated = useCallback((profile: MyProfile) => {
         setProfilePhotoUrl(profile.photoUrl);
@@ -2354,9 +2372,22 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
         let active = true;
         const loadWorkspace = async () => {
             const errors: string[] = [];
-            let hostNames = new Map(initialEmployees.map((item) => [item.uuid ?? item.id, item.name]));
+            let hostNames = new Map<string, string>();
             let hostCategories = new Map<string, PublicHost["category"]>();
-            if (role === "Team Lead") {
+            if (role === "System Admin") {
+                try {
+                    const [departmentList, managerAssignmentList] = await Promise.all([
+                        brainServeApi.departments(),
+                        brainServeApi.managerAssignments(),
+                    ]);
+                    if (!active) return;
+                    setDepartments(departmentList);
+                    setManagerAssignments(managerAssignmentList);
+                } catch (reason) {
+                    errors.push(reason instanceof ApiError ? reason.message
+                        : "The System Admin department directory could not be loaded from the database.");
+                }
+            } else if (role === "Team Lead") {
                 try {
                     const workspace = await brainServeApi.myTeamLeadWorkspace().catch(async () => {
                         const [assignment, employees, visibleDepartments] = await Promise.all([
@@ -3411,9 +3442,6 @@ function MyProfileView({ role, userEmail, departments, employees, staffAccounts,
         const employee = employees.find((item) => item.email.toLowerCase() === userEmail.toLowerCase()
             || Boolean(employeeId && (item.uuid ?? item.id) === employeeId));
         const department = departments.find((item) => item.id === employee?.departmentId);
-        const roleAuthority: Record<Role, string> = { "HR Admin": "ROLE_HR_ADMIN", Manager: "ROLE_MANAGER", "Team Lead": "ROLE_TEAM_LEAD",
-            CEO: "ROLE_CEO", Employee: "ROLE_EMPLOYEE", Reception: "ROLE_RECEPTIONIST", Security: "ROLE_SECURITY",
-            "System Admin": "ROLE_SYSTEM_ADMIN" };
         const photoUrl = typeof window === "undefined" ? null
             : window.localStorage.getItem(`brainserve.demo.profile.photo.${userEmail.toLowerCase()}`);
         return {
@@ -3421,7 +3449,7 @@ function MyProfileView({ role, userEmail, departments, employees, staffAccounts,
             employeeId: employeeId ?? employee?.uuid ?? null,
             fullName: savedAccount?.fullName ?? staffAccount?.fullName ?? employee?.name
                 ?? (role === "System Admin" ? "Jety Chodipilli" : role === "Reception" ? "Reception Desk" : role === "Security" ? "Security Desk" : role),
-            email: userEmail, roles: [roleAuthority[role]], employeeNumber: employee?.id ?? null,
+            email: userEmail, roles: [ROLE_AUTHORITY_BY_LABEL[role]], employeeNumber: employee?.id ?? null,
             designation: employee?.role ?? (role === "System Admin" ? "System Administrator" : role),
             employeeStatus: employee?.status?.toUpperCase().replaceAll(" ", "_") ?? (staffAccount?.enabled ? "ACTIVE" : null),
             departmentId: department?.id ?? null, departmentCode: department?.code ?? null,
@@ -3429,7 +3457,12 @@ function MyProfileView({ role, userEmail, departments, employees, staffAccounts,
             photoDocumentId: null, photoUrl, photoUrlExpiresAt: null,
         };
     }, [departments, employees, role, staffAccounts, userEmail]);
-    const [profile, setProfile] = useState<MyProfile>(() => demoProfile());
+    const [profile, setProfile] = useState<MyProfile>(() => isBackendConfigured ? {
+        userId: "", employeeId: null, fullName: role, email: userEmail,
+        roles: [ROLE_AUTHORITY_BY_LABEL[role]], employeeNumber: null, designation: role,
+        employeeStatus: null, departmentId: null, departmentCode: null, departmentName: null,
+        departmentActive: null, photoDocumentId: null, photoUrl: null, photoUrlExpiresAt: null,
+    } : demoProfile());
     const [backendProfileLoaded, setBackendProfileLoaded] = useState(!isBackendConfigured);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
@@ -3989,7 +4022,7 @@ function AccountLifecycleView({ role, userEmail, departments, employees }: {
                 && item.userId !== ("targetUserId" in target ? target.targetUserId : target.userId));
         }
         return all.filter((item) => item.enabled && item.role === targetRole && item.userId !== targetId)
-            .filter((item) => targetRole !== "ROLE_HR_ADMIN" || !readDemoDepartmentHrAssignments()
+            .filter((item) => isBackendConfigured || targetRole !== "ROLE_HR_ADMIN" || !readDemoDepartmentHrAssignments()
                 .some((assignment) => assignment.active && assignment.hrUserId === item.userId));
     };
 
@@ -5103,7 +5136,8 @@ function TeamLeadPerformanceView({ departments, employees, staffAccounts }: {
         void load(); return () => { active = false; };
     }, []);
     const leadName = (userId: string) => staffAccounts.find((item) => item.userId === userId)?.fullName
-        ?? initialStaffAccounts.find((item) => item.userId === userId)?.fullName ?? "Team Lead";
+        ?? (!isBackendConfigured ? initialStaffAccounts.find((item) => item.userId === userId)?.fullName : undefined)
+        ?? "Team Lead";
     const departmentName = (id: string) => departments.find((item) => item.id === id)?.name ?? "Assigned department";
     const total = items.reduce((sum, item) => sum + item.totalTasks, 0);
     const approved = items.reduce((sum, item) => sum + item.approvedTasks, 0);
@@ -6650,6 +6684,7 @@ function OrganizationView({ role, userEmail, departments, employees, staffAccoun
     const [executiveBusy, setExecutiveBusy] = useState(false);
     const [message, setMessage] = useState("");
     const demoVisibleDepartments = useMemo(() => {
+        if (isBackendConfigured) return [];
         if (role === "CEO") return departments;
         const account = [...readDemoAccounts(), ...staffAccounts].find((item) => item.email.toLowerCase() === userEmail.toLowerCase());
         const accountId = account && "id" in account ? account.id : account?.userId;
@@ -7432,10 +7467,10 @@ function AccountProvisioningPanel({ role, departments: initialApprovalDepartment
         !isBackendConfigured ? readDemoAccounts().filter((account) => accountVisibleToApprover(account, role)) : []);
     const [approvalDepartments, setApprovalDepartments] = useState<Department[]>(initialApprovalDepartments);
     const [assignedHrDepartmentIds, setAssignedHrDepartmentIds] = useState<Set<string>>(() => new Set(
-        (!isBackendConfigured ? readDemoDepartmentHrAssignments() : initialDepartmentHrAssignments)
+        (!isBackendConfigured ? readDemoDepartmentHrAssignments() : [])
             .filter((assignment) => assignment.active).map((assignment) => assignment.departmentId)));
     const [assignedManagerDepartmentIds, setAssignedManagerDepartmentIds] = useState<Set<string>>(() => new Set(
-        (!isBackendConfigured ? readDemoManagerAssignments() : initialManagerAssignments)
+        (!isBackendConfigured ? readDemoManagerAssignments() : [])
             .filter((assignment) => assignment.active).map((assignment) => assignment.departmentId)));
     const [hrDrafts, setHrDrafts] = useState<Record<string, HrAccountApprovalInput>>({});
     const [busyId, setBusyId] = useState("");
@@ -8907,8 +8942,8 @@ function SettingsView({ role, userEmail, accounts, departments, employees, teamL
     onUpdatePermissions: (userId: string, grants: string[], denies: string[]) => Promise<void>;
 }) {
     const [section, setSection] = useState<SettingsSection>("identity");
-    const [settings, setSettings] = useState<WorkspaceSetting[]>(fallbackSettings);
-    const [roles, setRoles] = useState<RoleDefinition[]>(fallbackRoles);
+    const [settings, setSettings] = useState<WorkspaceSetting[]>(() => isBackendConfigured ? [] : fallbackSettings);
+    const [roles, setRoles] = useState<RoleDefinition[]>(() => isBackendConfigured ? [] : fallbackRoles);
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
     const [busyKey, setBusyKey] = useState("");
@@ -10126,8 +10161,8 @@ function BackendBrainServeApp({ browserPreviewEnabled = false }: {
     browserPreviewEnabled?: boolean;
 }) {
     const [screen, setScreen] = useState<Screen>("welcome");
-    const [role, setRole] = useState<Role>("HR Admin");
-    const [userEmail, setUserEmail] = useState("hr.admin@brainserve.in");
+    const [role, setRole] = useState<Role | null>(() => isBackendConfigured ? null : "HR Admin");
+    const [userEmail, setUserEmail] = useState(() => isBackendConfigured ? "" : "hr.admin@brainserve.in");
     const [restoringSession, setRestoringSession] = useState(true);
     const [mustChangePassword, setMustChangePassword] = useState(false);
     const [currentPassword, setCurrentPassword] = useState("");
@@ -10232,7 +10267,7 @@ function BackendBrainServeApp({ browserPreviewEnabled = false }: {
         return <AccountRecovery type="PASSWORD" onNavigate={setScreen} />;
     if (screen === "forgot-email")
         return <AccountRecovery type="EMAIL" onNavigate={setScreen} />;
-    if (screen === "login")
+    if (screen === "login" || !role || !userEmail)
         return (
             <Login
                 browserPreviewEnabled={browserPreviewEnabled}
