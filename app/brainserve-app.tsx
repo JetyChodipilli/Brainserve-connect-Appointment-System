@@ -44,7 +44,7 @@ import {
     Users,
     X,
 } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { AccountClosureCandidate, AccountClosureRequest, AccountLifecycleAccount, AccountLifecycleRecord, AccountRecoveryRequest, ApiError, ArchiveManifest, ArchivedAccount, ArchivedRecoveryChallenge, brainServeApi, CompanyProfile, CompensationRecord, DataLegalHold, DepartmentEmployeeSummary, DepartmentHrAssignment, DirectArchiveChallenge, EmployeeDocument, EmployeeTerminationRequest, EssentialLogRecord, GovernanceLedgerEntry, GovernanceOverview, HistoryDataset, HistoryRow, HrAccountApprovalInput, HrLifecycleAccount, IntegrationOverview, InternalNotification,
     InternalNotificationRecipient, isBackendConfigured, LeaveRequest, ManagedAppointment, MonthlyRecords, ProvisioningAccount,
@@ -914,7 +914,7 @@ async function hashDemoPassword(password: string) {
         return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
     }
     // Standards-correct SHA-256 for non-secure local review contexts where
-    // WebCrypto is unavailable. Production passwords remain BCrypt-hashed.
+    // WebCrypto is unavailable. Production passwords remain Bcrypt-hashed.
     const constants = [
         0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
         0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
@@ -1987,14 +1987,31 @@ function AccountRecovery({ type, onNavigate }: {
     const title = isPassword ? "Reset your password" : "Recover your company email";
 
     const requestRecovery = async (event: FormEvent<HTMLFormElement>) => {
-        event.preventDefault(); setBusy("request"); setError(""); setRequestMessage("");
+        event.preventDefault();
+        if (busy) return;
+
         const form = event.currentTarget;
         const data = new FormData(form);
-        const identifier = String(data.get("identifier")).trim();
-        const role = String(data.get("role"));
+        const identifier = String(data.get("identifier") ?? "").trim();
+        const accountRole = String(data.get("role") ?? "").trim();
+
+        setError("");
+        setSuccess("");
+        setRequestMessage("");
+
+        if (!identifier) {
+            setError("Enter your company email or exact full name.");
+            return;
+        }
+        if (!accountRole) {
+            setError("Select your account role.");
+            return;
+        }
+
+        setBusy("request");
         try {
             if (isBackendConfigured) {
-                const result = await brainServeApi.requestAccountRecovery(identifier, role, type);
+                const result = await brainServeApi.requestAccountRecovery(identifier, accountRole, type);
                 setRequestMessage(result.message);
             } else {
                 const accounts = readDemoAccounts();
@@ -2003,7 +2020,7 @@ function AccountRecovery({ type, onNavigate }: {
                     ? accounts.find((account) => account.status === "ACTIVE"
                         && account.role !== "ROLE_SYSTEM_ADMIN"
                         && account.email.toLowerCase() === normalizedIdentifier)
-                    : accounts.find((account) => account.status === "ACTIVE" && account.role === role
+                    : accounts.find((account) => account.status === "ACTIVE" && account.role === accountRole
                         && account.fullName.toLowerCase() === normalizedIdentifier);
                 if (target) {
                     const requests = readDemoRecoveryRequests();
@@ -2022,7 +2039,9 @@ function AccountRecovery({ type, onNavigate }: {
             form.reset();
         } catch (reason) {
             setError(reason instanceof Error ? reason.message : "The recovery request could not be submitted.");
-        } finally { setBusy(""); }
+        } finally {
+            setBusy("");
+        }
     };
 
     const completeRecovery = async (event: FormEvent<HTMLFormElement>) => {
@@ -2080,7 +2099,7 @@ function AccountRecovery({ type, onNavigate }: {
         } finally { setBusy(""); }
     };
 
-    return <main className="login-page"><div className="ambient ambient-one" /><section className="login-brand"><Logo /><div><span className="eyebrow">System Admin approved recovery</span><h1>Regain access.<br />Securely.</h1><p>BrainServe Connect never retrieves an existing password. A one-time code must first be approved by the System Admin and expires after 30 minutes.</p></div><div className="login-trust"><ShieldCheck size={20} /><span><strong>One-time recovery</strong><small>Hashed code · Full audit trail · Sessions revoked</small></span></div></section><section className="login-card recovery-card glass-panel"><div className="login-card-head"><span className="avatar large"><Fingerprint size={22} /></span><div><small>ACCOUNT RECOVERY</small><h2>{title}</h2><p>Request approval, then use the code supplied by your System Admin.</p></div></div><div className="recovery-type-switch"><button type="button" className={isPassword ? "active" : ""} onClick={() => onNavigate("forgot-password")}>Password</button><button type="button" className={!isPassword ? "active" : ""} onClick={() => onNavigate("forgot-email")}>Company email</button></div><form onSubmit={requestRecovery} className="recovery-request-form"><strong>1. Request System Admin approval</strong><label>{isPassword ? "Company email or exact full name" : "Exact full name (or remembered company email)"}<input name="identifier" minLength={2} maxLength={255} autoComplete="off" required /></label><label>Account role<select name="role" defaultValue="ROLE_CEO"><option value="ROLE_CEO">CEO</option><option value="ROLE_HR_ADMIN">HR Admin</option><option value="ROLE_MANAGER">Manager</option><option value="ROLE_TEAM_LEAD">Team Lead</option><option value="ROLE_EMPLOYEE">Employee</option><option value="ROLE_RECEPTIONIST">Receptionist</option><option value="ROLE_SECURITY">Security</option></select></label><button className="button button-secondary full-button" disabled={Boolean(busy)}><UserCog size={16} />{busy === "request" ? "Sending request…" : "Request approval"}</button></form>{requestMessage && <div className="success-banner"><CheckCircle2 size={17} />{requestMessage}</div>}<div className="login-divider"><span>After approval</span></div><form onSubmit={completeRecovery}><strong>2. Use your one-time code</strong><label>System Admin recovery code<input name="code" placeholder="BSR-XXXX-XXXX-XXXX" pattern="BSR-[A-Za-z2-9]{4}-[A-Za-z2-9]{4}-[A-Za-z2-9]{4}" autoComplete="one-time-code" required /></label>{isPassword ? <><label>New password<div className="password-field"><input name="newPassword" type="password" minLength={12} maxLength={64} autoComplete="new-password" required /><LockKeyhole size={17} /></div></label><label>Confirm new password<div className="password-field"><input name="confirmPassword" type="password" minLength={12} maxLength={64} autoComplete="new-password" required /><LockKeyhole size={17} /></div></label><div className="password-policy">12-64 characters · uppercase · lowercase · number · special character · no spaces</div></> : <><label>New company email<input name="newEmail" type="email" placeholder="name@brainserve.in" autoComplete="email" required /></label><label>Confirm company email<input name="confirmEmail" type="email" placeholder="name@brainserve.in" autoComplete="email" required /></label></>}<button className="button button-primary button-large full-button" disabled={Boolean(busy)}>{busy === "recover" ? "Updating…" : isPassword ? "Set new password" : "Set company email"}<ArrowRight size={18} /></button></form>{success && <div className="success-banner"><CheckCircle2 size={17} />{success}</div>}{error && <div className="login-error" role="alert">{error}</div>}<button className="text-button back-home" onClick={() => onNavigate("login")}><ArrowLeft size={16} /> Back to sign in</button></section></main>;
+    return <main className="login-page"><div className="ambient ambient-one" /><section className="login-brand"><Logo /><div><span className="eyebrow">System Admin approved recovery</span><h1>Regain access.<br />Securely.</h1><p>BrainServe Connect never retrieves an existing password. A one-time code must first be approved by the System Admin and expires after 30 minutes.</p></div><div className="login-trust"><ShieldCheck size={20} /><span><strong>One-time recovery</strong><small>Hashed code · Full audit trail · Sessions revoked</small></span></div></section><section className="login-card recovery-card glass-panel"><div className="login-card-head"><span className="avatar large"><Fingerprint size={22} /></span><div><small>ACCOUNT RECOVERY</small><h2>{title}</h2><p>Request approval, then use the code supplied by your System Admin.</p></div></div><div className="recovery-type-switch"><button type="button" className={isPassword ? "active" : ""} onClick={() => onNavigate("forgot-password")}>Password</button><button type="button" className={!isPassword ? "active" : ""} onClick={() => onNavigate("forgot-email")}>Company email</button></div><form onSubmit={requestRecovery} className="recovery-request-form"><strong>1. Request System Admin approval</strong><label>{isPassword ? "Company email or exact full name" : "Exact full name (or remembered company email)"}<input name="identifier" minLength={2} maxLength={255} autoComplete="off" required /></label><label>Account role<select name="role" defaultValue="ROLE_CEO"><option value="ROLE_CEO">CEO</option><option value="ROLE_HR_ADMIN">HR Admin</option><option value="ROLE_MANAGER">Manager</option><option value="ROLE_TEAM_LEAD">Team Lead</option><option value="ROLE_EMPLOYEE">Employee</option><option value="ROLE_RECEPTIONIST">Receptionist</option><option value="ROLE_SECURITY">Security</option></select></label><button type="submit" className="button button-secondary full-button" disabled={Boolean(busy)}><UserCog size={16} />{busy === "request" ? "Sending request…" : "Request approval"}</button></form>{requestMessage && <div className="success-banner"><CheckCircle2 size={17} />{requestMessage}</div>}<div className="login-divider"><span>After approval</span></div><form onSubmit={completeRecovery}><strong>2. Use your one-time code</strong><label>System Admin recovery code<input name="code" placeholder="BSR-XXXX-XXXX-XXXX" pattern="BSR-[A-Za-z2-9]{4}-[A-Za-z2-9]{4}-[A-Za-z2-9]{4}" autoComplete="one-time-code" required /></label>{isPassword ? <><label>New password<div className="password-field"><input name="newPassword" type="password" minLength={12} maxLength={64} autoComplete="new-password" required /><LockKeyhole size={17} /></div></label><label>Confirm new password<div className="password-field"><input name="confirmPassword" type="password" minLength={12} maxLength={64} autoComplete="new-password" required /><LockKeyhole size={17} /></div></label><div className="password-policy">12-64 characters · uppercase · lowercase · number · special character · no spaces</div></> : <><label>New company email<input name="newEmail" type="email" placeholder="name@brainserve.in" autoComplete="email" required /></label><label>Confirm company email<input name="confirmEmail" type="email" placeholder="name@brainserve.in" autoComplete="email" required /></label></>}<button type="submit" className="button button-primary button-large full-button" disabled={Boolean(busy)}>{busy === "recover" ? "Updating…" : isPassword ? "Set new password" : "Set company email"}<ArrowRight size={18} /></button></form>{success && <div className="success-banner"><CheckCircle2 size={17} />{success}</div>}{error && <div className="login-error" role="alert">{error}</div>}<button type="button" className="text-button back-home" onClick={() => onNavigate("login")}><ArrowLeft size={16} /> Back to sign in</button></section></main>;
 }
 
 function AccountRegistration({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
@@ -2136,7 +2155,7 @@ function AccountRegistration({ onNavigate }: { onNavigate: (screen: Screen) => v
         finally { setBusy(false); }
     };
 
-    return <main className="login-page"><div className="ambient ambient-one" /><section className="login-brand"><Logo /><div><span className="eyebrow">Staff registration</span><h1>Request secure<br />workplace access.</h1><p>HR Admin and Manager requests go to the single company CEO. Employee, Receptionist and Security requests go to the assigned HR Admin.</p></div><div className="login-trust"><ShieldCheck size={20} /><span><strong>Role-based activation</strong><small>No pending account can sign in</small></span></div></section><section className="login-card glass-panel"><div className="login-card-head"><span className="avatar large">BS</span><div><small>NEW ACCOUNT REQUEST</small><h2>Register with BrainServe Connect</h2><p>Use your official company email.</p></div></div><div className="team-lead-registration-note"><BadgeCheck size={17} /><span><strong>CEO and Team Lead are governed roles</strong><small>System Admin creates the single CEO. Employees become Team Leads only through an audited role transition in their department. Receptionist and Security accounts are never eligible.</small></span></div><form onSubmit={submit}><label>Full name<input name="fullName" minLength={2} maxLength={170} required /></label><label>Company email<input name="email" type="email" placeholder="name@brainserve.in" required /></label><label>Requested role<select name="role"><option value="ROLE_MANAGER">Manager</option><option value="ROLE_HR_ADMIN">HR Admin</option><option value="ROLE_EMPLOYEE">Employee</option><option value="ROLE_RECEPTIONIST">Receptionist</option><option value="ROLE_SECURITY">Security</option></select></label><label>Password<div className="password-field"><input name="password" type="password" minLength={12} maxLength={64} autoComplete="new-password" required /><LockKeyhole size={17} /></div></label><label>Confirm password<div className="password-field"><input name="confirmPassword" type="password" minLength={12} maxLength={64} autoComplete="new-password" required /><LockKeyhole size={17} /></div></label><div className="password-policy">12-64 characters · uppercase · lowercase · number · special character · no spaces</div>{success && <div className="success-banner"><CheckCircle2 size={17} /> {success}</div>}{error && <div className="login-error" role="alert">{error}</div>}<button className="button button-primary button-large full-button" disabled={busy}>{busy ? "Submitting…" : "Submit account request"}<ArrowRight size={18} /></button></form><button className="text-button back-home" onClick={() => onNavigate("login")}><ArrowLeft size={16} /> Back to sign in</button></section></main>;
+    return <main className="login-page"><div className="ambient ambient-one" /><section className="login-brand"><Logo /><div><span className="eyebrow">Staff registration</span><h1>Request secure<br />workplace access.</h1><p>HR Admin and Manager requests go to the single company CEO. Employee, Receptionist and Security requests go to the assigned HR Admin.</p></div><div className="login-trust"><ShieldCheck size={20} /><span><strong>Role-based activation</strong><small>No pending account can sign in</small></span></div></section><section className="login-card glass-panel"><div className="login-card-head"><span className="avatar large">BS</span><div><small>NEW ACCOUNT REQUEST</small><h2>Register with BrainServe Connect</h2><p>Use your official company email.</p></div></div><div className="team-lead-registration-note"><BadgeCheck size={17} /><span><strong>CEO and Team Lead are governed roles</strong><small>System Admin creates the single CEO. Employees become Team Leads only through an audited role transition in their department. Receptionist and Security accounts are never eligible.</small></span></div><form onSubmit={submit}><label>Full name<input name="fullName" minLength={2} maxLength={170} required /></label><label>Company email<input name="email" type="email" placeholder="name@brainserve.in" required /></label><label>Requested role<select name="role"><option value="ROLE_MANAGER">Manager</option><option value="ROLE_HR_ADMIN">HR Admin</option><option value="ROLE_EMPLOYEE">Employee</option><option value="ROLE_RECEPTIONIST">Receptionist</option><option value="ROLE_SECURITY">Security</option></select></label><label>Password<div className="password-field"><input name="password" type="password" minLength={12} maxLength={64} autoComplete="new-password" required /><LockKeyhole size={17} /></div></label><label>Confirm password<div className="password-field"><input name="confirmPassword" type="password" minLength={12} maxLength={64} autoComplete="new-password" required /><LockKeyhole size={17} /></div></label><div className="password-policy">12-64 characters · uppercase · lowercase · number · special character · no spaces</div>{success && <div className="success-banner"><CheckCircle2 size={17} /> {success}</div>}{error && <div className="login-error" role="alert">{error}</div>}<button className="button button-primary button-large full-button" disabled={busy}>{busy ? "Submitting…" : "Submit account request"}<ArrowRight size={18} /></button></form><button type="button" className="text-button back-home" onClick={() => onNavigate("login")}><ArrowLeft size={16} /> Back to sign in</button></section></main>;
 }
 
 function mergeDemoStaffAccounts(current: StaffAccount[]) {
@@ -2209,6 +2228,7 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
     const appointmentSoundSnapshotRef = useRef<Map<string, AppointmentStatus> | null>(null);
     const [globalSearch, setGlobalSearch] = useState("");
     const [workspaceRevision, setWorkspaceRevision] = useState(0);
+    const [approvedRecovery, setApprovedRecovery] = useState<AccountRecoveryRequest | null>(null);
     const [liveState, setLiveState] = useState<RealtimeConnectionState>(isBackendConfigured ? "connecting" : "offline");
     const [lastLiveUpdate, setLastLiveUpdate] = useState<Date | null>(null);
     const [profilePhotoUrl, setProfilePhotoUrl] = useState<string | null>(() =>
@@ -3342,17 +3362,53 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
             <header className="app-header"><div className="global-search"><button className="icon-button menu-button" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button><Search size={18} /><input aria-label="Search" value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} placeholder="Search people, visits or reference…" />{globalSearch.trim().length >= 2 && <div className="global-search-results glass-panel">{globalSearchResults.map((result) => <button key={result.id} onClick={() => { setView(result.view); setGlobalSearch(""); }}><Search size={14} /><span><strong>{result.title}</strong><small>{result.detail}</small></span><ChevronRight size={14} /></button>)}{globalSearchResults.length === 0 && <div><strong>No matching workspace records</strong><small>Try a name, email or appointment reference.</small></div>}</div>}</div><div className="header-actions"><button type="button" className={`live-status ${isBackendConfigured ? `live-${liveState}` : "live-preview"}`} onClick={requestWorkspaceRefresh} title={lastLiveUpdate ? `Last synchronized ${lastLiveUpdate.toLocaleTimeString("en-IN")}` : "Refresh BrainServe Connect data"}><span />{isBackendConfigured ? liveState === "live" ? "Live" : liveState === "connecting" ? "Connecting" : liveState === "offline" ? "Offline" : "Reconnecting" : "Preview"}<RotateCcw size={13} /></button>{rolePermissions[role].includes("notifications") && <button className="icon-button notification-button" onClick={() => setView("notifications")} aria-label={`Open notifications${unreadNotifications ? `, ${unreadNotifications} unread` : ""}`}><Bell size={19} />{unreadNotifications > 0 && <span />}</button>}</div></header>
             <div className="app-content">
                 {operationError && <div className="login-error workspace-error" role="alert">{operationError}</div>}
-                {view === "overview" && (role === "System Admin"
-                    ? <AccountProvisioningPanel key={`overview:${workspaceRevision}`} role={role} departments={departments}
-                                                onDecision={refreshStaffAccounts} />
-                    : ["CEO", "HR Admin"].includes(role)
-                        ? <><Overview key={`overview:${workspaceRevision}:operations`} role={role} appointments={appointments}
-                                      metrics={metrics} onNavigate={setView} onRegister={() => setVisitModal(true)}
-                                      decideAppointment={decideAppointment} />
-                            <AccountProvisioningPanel key={`overview:${workspaceRevision}:accounts`} compact role={role}
-                                                      departments={departments} onDecision={refreshStaffAccounts} /></>
-                        : <Overview key={`overview:${workspaceRevision}`} role={role} appointments={appointments} metrics={metrics} onNavigate={setView}
-                                    onRegister={() => setVisitModal(true)} decideAppointment={decideAppointment} />)}
+                {view === "overview" && (
+                    role === "System Admin" ? (
+                        <>
+                            <AccountProvisioningPanel
+                                key={`overview:${workspaceRevision}`}
+                                role={role}
+                                departments={departments}
+                                onDecision={refreshStaffAccounts}
+                            />
+
+                            <AccountRecoveryApprovalPanel
+                                generated={approvedRecovery}
+                                onGeneratedChange={setApprovedRecovery}
+                            />
+                        </>
+                    ) : ["CEO", "HR Admin"].includes(role) ? (
+                        <>
+                            <Overview
+                                key={`overview:${workspaceRevision}:operations`}
+                                role={role}
+                                appointments={appointments}
+                                metrics={metrics}
+                                onNavigate={setView}
+                                onRegister={() => setVisitModal(true)}
+                                decideAppointment={decideAppointment}
+                            />
+
+                            <AccountProvisioningPanel
+                                key={`overview:${workspaceRevision}:accounts`}
+                                compact
+                                role={role}
+                                departments={departments}
+                                onDecision={refreshStaffAccounts}
+                            />
+                        </>
+                    ) : (
+                        <Overview
+                            key={`overview:${workspaceRevision}`}
+                            role={role}
+                            appointments={appointments}
+                            metrics={metrics}
+                            onNavigate={setView}
+                            onRegister={() => setVisitModal(true)}
+                            decideAppointment={decideAppointment}
+                        />
+                    )
+                )}
                 {view === "appointments" && <AppointmentsView key={`appointments:${workspaceRevision}`} role={role} appointments={appointments} currentEmployee={currentEmployee}
                                                               onCreate={() => setVisitModal(true)} decideAppointment={decideAppointment}
                                                               onSecurityIntake={setSecurityIntakeAppointment} decideReceptionVisit={decideReceptionVisit}
@@ -3403,6 +3459,7 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
                 {view === "settings" && <SettingsView key={`settings:${workspaceRevision}`} role={role} userEmail={userEmail} accounts={staffAccounts}
                                                       departments={departments} employees={employees} teamLeadAssignments={teamLeadAssignments}
                                                       departmentHrAssignments={departmentHrAssignments} managerAssignments={managerAssignments}
+                                                      approvedRecovery={approvedRecovery} onApprovedRecoveryChange={setApprovedRecovery}
                                                       onRoleAssignmentChanged={refreshRoleAssignments}
                                                       onAddEmployee={() => { setOperationError(""); setEmployeeAccountId(undefined); setEmployeeDepartmentId(undefined); setEmployeeModal(true); }}
                                                       onAssignTeamLead={assignTeamLead}
@@ -7365,10 +7422,12 @@ function accountVisibleToApprover(account: ProvisioningAccount, role: Role) {
     return false;
 }
 
-function AccountRecoveryApprovalPanel() {
+function AccountRecoveryApprovalPanel({ generated, onGeneratedChange }: {
+    generated: AccountRecoveryRequest | null;
+    onGeneratedChange: (request: AccountRecoveryRequest | null) => void;
+}) {
     const [requests, setRequests] = useState<AccountRecoveryRequest[]>(() =>
         isBackendConfigured ? [] : readDemoRecoveryRequests().filter((item) => item.status === "PENDING"));
-    const [generated, setGenerated] = useState<AccountRecoveryRequest | null>(null);
     const [busyId, setBusyId] = useState("");
     const [copied, setCopied] = useState(false);
     const [message, setMessage] = useState("");
@@ -7417,6 +7476,19 @@ function AccountRecoveryApprovalPanel() {
         };
     }, [loadRequests]);
 
+    useEffect(() => {
+        if (!generated?.expiresAt) return;
+        const expiresAt = Date.parse(generated.expiresAt);
+        if (!Number.isFinite(expiresAt)) return;
+        const expiryTimer = window.setTimeout(() => {
+            onGeneratedChange(null);
+            setCopied(false);
+            setMessage("");
+            setError("The displayed recovery code has expired.");
+        }, Math.max(0, expiresAt - Date.now()));
+        return () => window.clearTimeout(expiryTimer);
+    }, [generated?.id, generated?.expiresAt, onGeneratedChange]);
+
     const decide = async (request: AccountRecoveryRequest, decision: "approve" | "reject") => {
         setBusyId(request.id); setError(""); setMessage(""); setCopied(false);
         try {
@@ -7438,10 +7510,12 @@ function AccountRecoveryApprovalPanel() {
             }
             setRequests((items) => items.filter((item) => item.id !== request.id));
             if (decision === "approve") {
-                setGenerated(result);
+                if (!result.recoveryCode) {
+                    throw new Error("Recovery was approved, but the backend did not return the one-time code.");
+                }
+                onGeneratedChange(result);
                 setMessage(`Recovery approved for ${request.fullName}. Give the code to the verified account owner securely.`);
             } else {
-                setGenerated(null);
                 setMessage(`Recovery request for ${request.fullName} was rejected.`);
             }
         } catch (reason) {
@@ -7457,7 +7531,7 @@ function AccountRecoveryApprovalPanel() {
         } catch { setError("Copy was blocked by the browser. Select the code and copy it manually."); }
     };
 
-    return <article className="panel glass-panel recovery-approval-panel"><div className="panel-heading"><div><span>ACCOUNT RECOVERY APPROVALS</span><h2>Password & company email requests</h2><p>Verify the requester’s identity before approval. Only the System Admin can issue these one-time codes.</p></div><span className="panel-heading-actions"><b>{requests.length}</b><button type="button" className="button button-secondary" onClick={() => void loadRequests()}><RotateCcw size={15} /> Refresh requests</button></span></div>{generated?.recoveryCode && <div className="recovery-code-card"><span><ShieldCheck size={18} /> APPROVED · SHOWN FOR THIS SESSION</span><h3>{generated.fullName}</h3><p>{generated.type === "PASSWORD" ? "Password reset" : "Company email recovery"} · expires {generated.expiresAt ? new Date(generated.expiresAt).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : "in 30 minutes"}</p><code>{generated.recoveryCode}</code><div><button className="button button-secondary" onClick={() => void copyCode()}>{copied ? <Check size={16} /> : <FileText size={16} />}{copied ? "Copied" : "Copy code"}</button><button className="text-button" onClick={() => setGenerated(null)}>Dismiss code</button></div><small>BrainServe Connect stores only a SHA-256 hash on the backend. This raw code cannot be displayed again.</small></div>}<div className="staff-account-list">{requests.map((request) => <div className="staff-account-row" key={request.id}><div className="staff-account-head"><span className="role-icon"><Fingerprint size={18} /></span><span><strong>{request.fullName}</strong><small>{request.email} · {request.role.replace("ROLE_", "").replaceAll("_", " ")} · {request.type === "PASSWORD" ? "Password reset" : "Email recovery"}</small></span><span className="status-pill status-pending"><span />Pending</span></div><div className="approval-actions"><button className="button button-reject" disabled={busyId === request.id} onClick={() => void decide(request, "reject")}><X size={16} /> Reject</button><button className="button button-approve" disabled={busyId === request.id} onClick={() => void decide(request, "approve")}><Check size={16} /> Verify & issue code</button></div></div>)}{requests.length === 0 && <div className="empty-state"><CheckCircle2 size={28} /><strong>No pending recovery requests</strong><small>Password and email recovery approvals will appear here.</small></div>}</div>{message && <div className="success-banner"><CheckCircle2 size={17} />{message}</div>}{error && <div className="login-error" role="alert">{error}</div>}</article>;
+    return <article className="panel glass-panel recovery-approval-panel"><div className="panel-heading"><div><span>ACCOUNT RECOVERY APPROVALS</span><h2>Password & company email requests</h2><p>Verify the requester’s identity before approval. Only the System Admin can issue these one-time codes.</p></div><span className="panel-heading-actions"><b>{requests.length}</b><button type="button" className="button button-secondary" onClick={() => void loadRequests()}><RotateCcw size={15} /> Refresh requests</button></span></div>{generated?.recoveryCode && <div className="recovery-code-card"><span><ShieldCheck size={18} /> APPROVED · AVAILABLE UNTIL DISMISSED OR EXPIRED</span><h3>{generated.fullName}</h3><p>{generated.type === "PASSWORD" ? "Password reset" : "Company email recovery"} · expires {generated.expiresAt ? new Date(generated.expiresAt).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : "in 30 minutes"}</p><code>{generated.recoveryCode}</code><div><button type="button" className="button button-secondary" onClick={() => void copyCode()}>{copied ? <Check size={16} /> : <FileText size={16} />}{copied ? "Copied" : "Copy code"}</button><button type="button" className="text-button" onClick={() => { onGeneratedChange(null); setCopied(false); setMessage(""); }}>Dismiss code</button></div><small>The raw code stays only in the current authenticated dashboard memory. It disappears on logout, page reload, manual dismissal or expiry.</small></div>}<div className="staff-account-list">{requests.map((request) => <div className="staff-account-row" key={request.id}><div className="staff-account-head"><span className="role-icon"><Fingerprint size={18} /></span><span><strong>{request.fullName}</strong><small>{request.email} · {request.role.replace("ROLE_", "").replaceAll("_", " ")} · {request.type === "PASSWORD" ? "Password reset" : "Email recovery"}</small></span><span className="status-pill status-pending"><span />Pending</span></div><div className="approval-actions"><button type="button" className="button button-reject" disabled={busyId === request.id} onClick={() => void decide(request, "reject")}><X size={16} /> Reject</button><button type="button" className="button button-approve" disabled={busyId === request.id} onClick={() => void decide(request, "approve")}><Check size={16} /> Verify & issue code</button></div></div>)}{requests.length === 0 && <div className="empty-state"><CheckCircle2 size={28} /><strong>No pending recovery requests</strong><small>Password and email recovery approvals will appear here.</small></div>}</div>{message && <div className="success-banner"><CheckCircle2 size={17} />{message}</div>}{error && <div className="login-error" role="alert">{error}</div>}</article>;
 }
 
 function AccountProvisioningPanel({ role, departments: initialApprovalDepartments, onDecision, compact = false }: {
@@ -8049,7 +8123,6 @@ function AccountProvisioningPanel({ role, departments: initialApprovalDepartment
                 <small>This account is available only in this browser profile until the Spring Boot API is connected.</small>
             </div>}
         </article>}
-        {role === "System Admin" && <AccountRecoveryApprovalPanel />}
         <article className="panel glass-panel">
             <div className="panel-heading"><div><span>PENDING REQUESTS</span><h2>{queueTitle}</h2>
                 <p>{role === "System Admin"
@@ -8927,11 +9000,14 @@ function ManagerDepartmentAssignmentPanel({ departments, assignments, onChanged 
 }
 
 function SettingsView({ role, userEmail, accounts, departments, employees, teamLeadAssignments, onAddEmployee, onAssignTeamLead,
-                          departmentHrAssignments, managerAssignments, onRoleAssignmentChanged,
+                          departmentHrAssignments, managerAssignments, approvedRecovery, onApprovedRecoveryChange,
+                          onRoleAssignmentChanged,
                           onCreate, onChangeEmail, onResetPassword, onSetEnabled, onUpdatePermissions }: {
     role: Role; userEmail: string; accounts: StaffAccount[]; departments: Department[]; employees: Employee[];
     teamLeadAssignments: TeamLeadAssignment[]; departmentHrAssignments: DepartmentHrAssignment[];
     managerAssignments: ManagerAssignment[];
+    approvedRecovery: AccountRecoveryRequest | null;
+    onApprovedRecoveryChange: (request: AccountRecoveryRequest | null) => void;
     onRoleAssignmentChanged: () => Promise<void>;
     onAddEmployee: () => void;
     onAssignTeamLead: (departmentId: string, employeeId: string) => Promise<boolean>;
@@ -8951,6 +9027,7 @@ function SettingsView({ role, userEmail, accounts, departments, employees, teamL
     const [teamLeadQuery, setTeamLeadQuery] = useState("");
     const [teamLeadCandidates, setTeamLeadCandidates] = useState<Employee[]>([]);
     const [teamLeadCandidatesLoading, setTeamLeadCandidatesLoading] = useState(false);
+    const [teamLeadCandidatesError, setTeamLeadCandidatesError] = useState("");
     const [managedAccounts, setManagedAccounts] = useState<StaffAccount[]>(accounts);
     const [managedAccountPage, setManagedAccountPage] = useState(0);
     const [managedAccountTotalPages, setManagedAccountTotalPages] = useState(1);
@@ -9011,8 +9088,10 @@ function SettingsView({ role, userEmail, accounts, departments, employees, teamL
     }, [loadManagedAccounts, role]);
 
     const loadTeamLeadCandidates = useCallback(async (departmentId: string, query = "") => {
-        if (!departmentId) { setTeamLeadCandidates([]); return; }
+        if (!departmentId) { setTeamLeadCandidates([]); setTeamLeadCandidatesError(""); setError(""); return; }
         setTeamLeadCandidatesLoading(true);
+        setTeamLeadCandidatesError("");
+        setError("");
         try {
             const department = departments.find((item) => item.id === departmentId);
             if (isBackendConfigured) {
@@ -9033,7 +9112,9 @@ function SettingsView({ role, userEmail, accounts, departments, employees, teamL
             }
         } catch (reason) {
             setTeamLeadCandidates([]);
-            setError(reason instanceof Error ? reason.message : "Team Lead candidates could not be loaded.");
+            const message = reason instanceof Error ? reason.message : "Team Lead candidates could not be loaded.";
+            setTeamLeadCandidatesError(message);
+            setError(message);
         } finally { setTeamLeadCandidatesLoading(false); }
     }, [departments, employees]);
 
@@ -9057,7 +9138,7 @@ function SettingsView({ role, userEmail, accounts, departments, employees, teamL
         finally { setBusyKey(""); }
     };
 
-    const create = async (event: FormEvent<HTMLFormElement>) => {
+    const  create = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault(); setError(""); setMessage("");
         const form = event.currentTarget; const data = new FormData(form);
         try {
@@ -9088,6 +9169,14 @@ function SettingsView({ role, userEmail, accounts, departments, employees, teamL
 
     const activeLeadEmployeeIds = new Set(teamLeadAssignments.filter((item) => item.active)
         .map((item) => item.teamLeadEmployeeId));
+    const currentAccount = accounts.find((account) => account.email.toLowerCase() === userEmail.toLowerCase());
+    const currentHrUserId = currentAccount?.userId ?? (!isBackendConfigured
+        ? readDemoAccounts().find((account) => account.email.toLowerCase() === userEmail.toLowerCase())?.id
+        : undefined);
+    const assignedHrDepartmentId = role === "HR Admin" ? departmentHrAssignments
+        .find((assignment) => assignment.active && assignment.hrUserId === currentHrUserId)?.departmentId : undefined;
+    const assignableTeamLeadDepartments = departments.filter((department) => department.active
+        && (role !== "HR Admin" || department.id === assignedHrDepartmentId));
     const selectedTeamLeadDepartment = departments.find((department) => department.id === teamLeadDepartmentId);
     const candidatePool = isBackendConfigured || teamLeadCandidates.length || teamLeadQuery
         ? teamLeadCandidates : employees;
@@ -9117,16 +9206,19 @@ function SettingsView({ role, userEmail, accounts, departments, employees, teamL
             {section === "identity" && <>
                 <article className="panel glass-panel"><div className="panel-heading"><div><span>YOUR STAFF IDENTITY</span><h2>Company login</h2><p>Current login: <strong>{userEmail}</strong>. Your authenticated role is locked to <strong>{role}</strong>.</p></div><LockKeyhole size={22} /></div>{role !== "System Admin" && <form className="inline-account-form" onSubmit={changeOwnEmail}><label>New company email<input name="newEmail" type="email" placeholder="name@brainserve.in" required /></label><label>Current password<input name="currentPassword" type="password" minLength={8} required /></label><button className="button button-secondary"><Fingerprint size={16} /> Update my email</button></form>}</article>
                 <PasswordChangeCard />
+                {role === "System Admin" && <AccountRecoveryApprovalPanel
+                    generated={approvedRecovery} onGeneratedChange={onApprovedRecoveryChange} />}
                 {role === "HR Admin" ? <>
                     <article className="panel glass-panel"><div className="panel-heading"><div><span>CREATE EMPLOYEE</span><h2>Employee profile and department</h2><p>Create the employee profile, assign the HR Admin&apos;s department and generate the employee ID in one flow.</p></div><Building2 size={22} /></div><div className="team-lead-access-note"><BadgeCheck size={17} /><span><strong>Department assignment is mandatory</strong><small>The employee form includes department, designation and joining date. If HR manages one department, it is selected automatically.</small></span></div><button type="button" className="button button-primary" onClick={onAddEmployee} disabled={!departments.some((item) => item.active)}><UserPlus size={16} /> Add employee &amp; assign department</button>{!departments.some((item) => item.active) && <div className="login-error" role="alert">No active department is available. Ask the CEO or System Admin to assign this HR Admin to a department.</div>}</article>
                     <article className="panel glass-panel"><div className="panel-heading"><div><span>CREATE ACCESS-ONLY LOGIN</span><h2>Receptionist or Security</h2><p>These roles do not belong to an employee department. Each login remains pending until an HR Admin approves it.</p></div></div><form className="staff-create-form" onSubmit={create}><label>Company email<input name="email" type="email" placeholder="name@brainserve.in" required /></label><label>Temporary password<input name="password" type="password" minLength={12} placeholder="Minimum 12 characters" required /></label><label>Role<select name="role">{allowedRoles.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><button className="button button-primary"><UserPlus size={16} /> Create login</button></form></article>
                     <article className="panel glass-panel team-lead-access-card"><div className="panel-heading"><div><span>CREATE TEAM LEAD ACCESS</span><h2>Promote an approved employee</h2><p>A Team Lead keeps their existing company email and password. HR assigns one active employee login to one department.</p></div><BadgeCheck size={22} /></div>
                         <div className="team-lead-access-note"><ShieldCheck size={17} /><span><strong>Employees only — Security and Receptionist are excluded</strong><small>Only an active, approved Employee login from the selected department can appear here. Promotion revokes existing refresh sessions and the next sign-in opens Team Lead access for that department.</small></span></div>
                         <form className="staff-create-form team-lead-access-form" onSubmit={assignTeamLeadAccess}>
-                            <label>Department<select name="departmentId" value={teamLeadDepartmentId} onChange={(event) => { setTeamLeadDepartmentId(event.target.value); setTeamLeadCandidates([]); setTeamLeadQuery(""); }} required><option value="">Select active department</option>{departments.filter((item) => item.active).map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}</select></label>
+                            <label>Department<select name="departmentId" value={teamLeadDepartmentId} onChange={(event) => { setTeamLeadDepartmentId(event.target.value); setTeamLeadCandidates([]); setTeamLeadCandidatesError(""); setError(""); setTeamLeadQuery(""); }} required disabled={assignableTeamLeadDepartments.length === 0}><option value="">{assignableTeamLeadDepartments.length ? "Select your assigned department" : "No HR department assignment"}</option>{assignableTeamLeadDepartments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}</select></label>
                             <label>Find approved Employee<div className="directory-search-row"><input value={teamLeadQuery} onChange={(event) => setTeamLeadQuery(event.target.value)} placeholder="Name, employee ID or company email" /><button type="button" className="button button-secondary" disabled={!teamLeadDepartmentId || teamLeadCandidatesLoading} onClick={() => void loadTeamLeadCandidates(teamLeadDepartmentId, teamLeadQuery)}><Search size={15} />{teamLeadCandidatesLoading ? "Searching…" : "Search"}</button></div></label>
-                            <label>Approved Employee login<select name="employeeId" defaultValue="" key={`${teamLeadDepartmentId}:${teamLeadQuery}`} required disabled={teamLeadCandidatesLoading}><option value="">{teamLeadCandidatesLoading ? "Loading eligible employees…" : eligibleTeamLeadEmployees.length ? "Select Employee from this department" : "No active Employee found"}</option>{eligibleTeamLeadEmployees.map((employee) => <option value={employee.uuid ?? employee.id} key={employee.uuid ?? employee.id}>{employee.name} · Employee · {employee.department}</option>)}</select></label>
-                            <button className="button button-primary" disabled={busyKey === "team-lead-assignment" || !teamLeadDepartmentId || eligibleTeamLeadEmployees.length === 0}><BadgeCheck size={16} /> {busyKey === "team-lead-assignment" ? "Creating access…" : "Create Team Lead access"}</button>
+                            <label>Approved Employee login<select name="employeeId" defaultValue="" key={`${teamLeadDepartmentId}:${teamLeadQuery}`} required disabled={teamLeadCandidatesLoading || Boolean(teamLeadCandidatesError)}><option value="">{teamLeadCandidatesLoading ? "Loading eligible employees…" : teamLeadCandidatesError ? "Employee list could not be loaded" : eligibleTeamLeadEmployees.length ? "Select an Employee in this department" : teamLeadCandidates.length ? "All active employees are already Team Leads" : "No active employees in this department"}</option>{eligibleTeamLeadEmployees.map((employee) => <option value={employee.uuid ?? employee.id} key={employee.uuid ?? employee.id}>{employee.name} · Employee · {employee.department}</option>)}</select></label>
+                            {teamLeadCandidatesError && <div className="login-error" role="alert">{teamLeadCandidatesError}</div>}
+                            <button className="button button-primary" disabled={busyKey === "team-lead-assignment" || !teamLeadDepartmentId || eligibleTeamLeadEmployees.length === 0 || Boolean(teamLeadCandidatesError)}><BadgeCheck size={16} /> {busyKey === "team-lead-assignment" ? "Creating access…" : "Create Team Lead access"}</button>
                         </form>
                         {selectedTeamLeadDepartment && <div className="team-lead-readiness"><Users size={16} /><span><strong>{selectedDepartmentEmployees.length} matching member{selectedDepartmentEmployees.length === 1 ? "" : "s"} · {eligibleTeamLeadEmployees.length} available for validation</strong><small>The backend confirms the selected employee has an active approved Employee login in your department before promotion.</small></span></div>}
                         <div className="active-team-lead-list">{teamLeadAssignments.filter((item) => item.active).map((assignment) => { const department = departments.find((item) => item.id === assignment.departmentId); const employee = employees.find((item) => (item.uuid ?? item.id) === assignment.teamLeadEmployeeId); return <span key={assignment.id}><BadgeCheck size={14} /><strong>{department?.name ?? "Department"}</strong><small>{employee?.name ?? "Assigned Team Lead"}</small></span>; })}{teamLeadAssignments.every((item) => !item.active) && <small>No Team Lead assignments yet.</small>}</div>
