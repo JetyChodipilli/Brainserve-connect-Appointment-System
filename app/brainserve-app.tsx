@@ -3362,53 +3362,17 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
             <header className="app-header"><div className="global-search"><button className="icon-button menu-button" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button><Search size={18} /><input aria-label="Search" value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} placeholder="Search people, visits or reference…" />{globalSearch.trim().length >= 2 && <div className="global-search-results glass-panel">{globalSearchResults.map((result) => <button key={result.id} onClick={() => { setView(result.view); setGlobalSearch(""); }}><Search size={14} /><span><strong>{result.title}</strong><small>{result.detail}</small></span><ChevronRight size={14} /></button>)}{globalSearchResults.length === 0 && <div><strong>No matching workspace records</strong><small>Try a name, email or appointment reference.</small></div>}</div>}</div><div className="header-actions"><button type="button" className={`live-status ${isBackendConfigured ? `live-${liveState}` : "live-preview"}`} onClick={requestWorkspaceRefresh} title={lastLiveUpdate ? `Last synchronized ${lastLiveUpdate.toLocaleTimeString("en-IN")}` : "Refresh BrainServe Connect data"}><span />{isBackendConfigured ? liveState === "live" ? "Live" : liveState === "connecting" ? "Connecting" : liveState === "offline" ? "Offline" : "Reconnecting" : "Preview"}<RotateCcw size={13} /></button>{rolePermissions[role].includes("notifications") && <button className="icon-button notification-button" onClick={() => setView("notifications")} aria-label={`Open notifications${unreadNotifications ? `, ${unreadNotifications} unread` : ""}`}><Bell size={19} />{unreadNotifications > 0 && <span />}</button>}</div></header>
             <div className="app-content">
                 {operationError && <div className="login-error workspace-error" role="alert">{operationError}</div>}
-                {view === "overview" && (
-                    role === "System Admin" ? (
-                        <>
-                            <AccountProvisioningPanel
-                                key={`overview:${workspaceRevision}`}
-                                role={role}
-                                departments={departments}
-                                onDecision={refreshStaffAccounts}
-                            />
-
-                            <AccountRecoveryApprovalPanel
-                                generated={approvedRecovery}
-                                onGeneratedChange={setApprovedRecovery}
-                            />
-                        </>
-                    ) : ["CEO", "HR Admin"].includes(role) ? (
-                        <>
-                            <Overview
-                                key={`overview:${workspaceRevision}:operations`}
-                                role={role}
-                                appointments={appointments}
-                                metrics={metrics}
-                                onNavigate={setView}
-                                onRegister={() => setVisitModal(true)}
-                                decideAppointment={decideAppointment}
-                            />
-
-                            <AccountProvisioningPanel
-                                key={`overview:${workspaceRevision}:accounts`}
-                                compact
-                                role={role}
-                                departments={departments}
-                                onDecision={refreshStaffAccounts}
-                            />
-                        </>
-                    ) : (
-                        <Overview
-                            key={`overview:${workspaceRevision}`}
-                            role={role}
-                            appointments={appointments}
-                            metrics={metrics}
-                            onNavigate={setView}
-                            onRegister={() => setVisitModal(true)}
-                            decideAppointment={decideAppointment}
-                        />
-                    )
-                )}
+                {view === "overview" && (role === "System Admin"
+                    ? <AccountProvisioningPanel key={`overview:${workspaceRevision}`} role={role} departments={departments}
+                                                onDecision={refreshStaffAccounts} />
+                    : ["CEO", "HR Admin"].includes(role)
+                        ? <><Overview key={`overview:${workspaceRevision}:operations`} role={role} appointments={appointments}
+                                      metrics={metrics} onNavigate={setView} onRegister={() => setVisitModal(true)}
+                                      decideAppointment={decideAppointment} />
+                            <AccountProvisioningPanel key={`overview:${workspaceRevision}:accounts`} compact role={role}
+                                                      departments={departments} onDecision={refreshStaffAccounts} /></>
+                        : <Overview key={`overview:${workspaceRevision}`} role={role} appointments={appointments} metrics={metrics} onNavigate={setView}
+                                    onRegister={() => setVisitModal(true)} decideAppointment={decideAppointment} />)}
                 {view === "appointments" && <AppointmentsView key={`appointments:${workspaceRevision}`} role={role} appointments={appointments} currentEmployee={currentEmployee}
                                                               onCreate={() => setVisitModal(true)} decideAppointment={decideAppointment}
                                                               onSecurityIntake={setSecurityIntakeAppointment} decideReceptionVisit={decideReceptionVisit}
@@ -10096,7 +10060,8 @@ function VisitRegistrationModal({
                     </button>
                 </header>
                 <form onSubmit={submit}>
-                    <div className="modal-form-grid">
+                    <div className="visit-modal-body">
+                        <div className="modal-form-grid">
                         <label>
                             Visitor name
                             <input
@@ -10373,11 +10338,13 @@ function VisitRegistrationModal({
                             </>
                         )}
                     </div>
-                    {error && (
-                        <div className="login-error" role="alert">
-                            {error}
-                        </div>
-                    )}
+                        {error && (
+                            <div className="login-error" role="alert">
+                                {error}
+                            </div>
+                        )}
+                    </div>
+
                     <div className="modal-actions">
                         <button
                             type="button"

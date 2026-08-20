@@ -848,7 +848,7 @@ input::placeholder, textarea::placeholder { color: #ad9da1; }
 .org-card:hover { transform: translateY(-2px); box-shadow: 0 22px 52px rgba(103,12,31,.1); }
 .org-card.expanded { grid-column: 1 / -1; transform: none; }
 .org-card-head { display: flex; justify-content: space-between; align-items: center; }
-.dept-icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 14px; background: linear-gradient(145deg, #fff, var(--red-50)); color: var(--red-700); border: 1px solid #f3d7dd; box-shadow: 0 8px 20px rgba(151,19,35,.08); }
+.dept-icon img { display: block; width: 30px; height: 30px; border-radius: 8px; object-fit: contain; }
 .org-status { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 8px; font-weight: 700; }
 .org-status i { width: 7px; height: 7px; border-radius: 50%; background: #a8a0a2; }
 .org-status i.active { background: #3f9b6b; box-shadow: 0 0 0 4px rgba(63,155,107,.1); }
