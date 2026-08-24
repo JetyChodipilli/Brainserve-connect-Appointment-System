@@ -20,14 +20,22 @@ const migration = readFileSync(
 );
 const ui = readFileSync(new URL("../app/brainserve-app.tsx", import.meta.url), "utf8");
 
-test("HR and Team Lead employee lists are derived from their assigned department", () => {
+test("HR, Manager, Team Lead and Employee lists are derived from their assigned department", () => {
     const hrScope = service.indexOf('actor.roles().contains("ROLE_HR_ADMIN")');
     const teamLeadScope = service.indexOf('actor.roles().contains("ROLE_TEAM_LEAD")');
+    const managerScope = service.indexOf('actor.roles().contains("ROLE_MANAGER")');
+    const employeeScope = service.indexOf('actor.roles().contains("ROLE_EMPLOYEE")');
 
     assert.ok(hrScope >= 0);
     assert.ok(teamLeadScope > hrScope);
+    assert.ok(managerScope > teamLeadScope);
+    assert.ok(employeeScope > managerScope);
     assert.match(service, /departmentHrs\s*\.requireForUser\(actorUserId\)\s*\.departmentId\(\)/);
     assert.match(service, /teamLeads\s*\.requireForUser\(actorUserId\)\s*\.departmentId\(\)/);
+    assert.match(service, /managers\s*\.requireForUser\(actorUserId\)\s*\.departmentId\(\)/);
+    assert.match(service, /actor\.employeeId\(\)/);
+    assert.match(service, /departmentIdForEmployee\(actor\.employeeId\(\)\)/);
+    assert.match(service, /EMPLOYEE_PROFILE_NOT_LINKED/);
     assert.match(service, /EMPLOYEE_DEPARTMENT_SCOPE_DENIED/);
 });
 
@@ -39,11 +47,11 @@ test("employee read and lifecycle endpoints pass the authenticated actor into sc
 });
 
 test("department-scoped employee UI removes the company-wide department selector", () => {
-    assert.match(ui, /const departmentScoped = role === "HR Admin" \|\| role === "Team Lead"/);
+    assert.match(ui, /const departmentScoped = \["HR Admin", "Manager", "Team Lead", "Employee"\]\.includes\(role\)/);
     assert.match(ui, /loadedEmployees\.filter\(\s*\(employee\) => employee\.departmentId === scopedDepartmentId/);
     assert.match(ui, /departmentScoped\s*\?\s*scopedDepartmentId[\s\S]*?: \[\][\s\S]*?: loadedEmployees/);
     assert.match(ui, /if \(departmentScoped && !scopedDepartmentId\)[\s\S]*?setBackendPageEmployees\(\[\]\)[\s\S]*?setTotalElements\(0\)/);
-    assert.match(ui, /Your Team Lead department assignment could not be resolved/);
+    assert.match(ui, /Your employee department assignment could not be resolved/);
     assert.match(ui, /departmentId: selectedDepartment/);
     assert.match(ui, /departmentScoped \?[\s\S]*scoped-department-label[\s\S]*All departments/);
     assert.match(ui, /<small>\{role\} · \{userEmail\}<\/small>/);

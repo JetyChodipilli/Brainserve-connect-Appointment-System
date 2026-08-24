@@ -92,10 +92,7 @@ public class EmployeeService implements EmployeeDirectory, EmployeeStatistics {
         var department =
                 organization.requireActiveDepartment(command.departmentId());
 
-        long sequence = ((Number) entityManager
-                .createNativeQuery("select nextval('employee_number_seq')")
-                .getSingleResult())
-                .longValue();
+        long sequence = nextEmployeeNumberSequence();
 
         String employeeNumber =
                 "BSPL-"
@@ -434,12 +431,7 @@ public class EmployeeService implements EmployeeDirectory, EmployeeStatistics {
 
             String[] names = splitName(account.fullName());
 
-            long sequence = ((Number) entityManager
-                    .createNativeQuery(
-                            "select nextval('employee_number_seq')"
-                    )
-                    .getSingleResult())
-                    .longValue();
+            long sequence = nextEmployeeNumberSequence();
 
             String employeeNumber =
                     "BSPL-"
@@ -705,7 +697,6 @@ public class EmployeeService implements EmployeeDirectory, EmployeeStatistics {
         employee.transitionTo(next);
 
         if (next == EmployeeStatus.RESIGNED
-                || next == EmployeeStatus.TERMINATED
                 || next == EmployeeStatus.INACTIVE) {
             identity.disableEmployeeAccount(
                     employee.getId()
@@ -770,6 +761,17 @@ public class EmployeeService implements EmployeeDirectory, EmployeeStatistics {
             return managers
                     .requireForUser(actorUserId)
                     .departmentId();
+        }
+
+        if (actor.roles().contains("ROLE_EMPLOYEE")) {
+            if (actor.employeeId() == null) {
+                throw new BusinessException(
+                        "EMPLOYEE_PROFILE_NOT_LINKED",
+                        "This Employee login is not linked to an employee profile",
+                        HttpStatus.UNPROCESSABLE_ENTITY
+                );
+            }
+            return departmentIdForEmployee(actor.employeeId());
         }
 
         return null;
@@ -885,6 +887,18 @@ public class EmployeeService implements EmployeeDirectory, EmployeeStatistics {
         );
     }
 
+    @SuppressWarnings({"SqlResolve", "SqlDialectInspection", "SqlNoDataSourceInspection"})
+    private long nextEmployeeNumberSequence() {
+        return ((Number) entityManager
+                .createNativeQuery(
+                        "select nextval(to_regclass(:sequenceName))"
+                )
+                .setParameter("sequenceName", "employee_number_seq")
+                .getSingleResult())
+                .longValue();
+    }
+
+    @SuppressWarnings("SpellCheckingInspection")
     private String generateTemporaryPassword() {
         final String alphabet =
                 "ABCDEFGHJKLMNPQRSTUVWXYZ"

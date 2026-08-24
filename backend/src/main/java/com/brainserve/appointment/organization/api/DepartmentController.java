@@ -47,16 +47,7 @@ public class DepartmentController {
     }
 
     @GetMapping
-    @PreAuthorize("""
-            hasAnyAuthority(
-                'ROLE_SYSTEM_ADMIN',
-                'ROLE_CEO',
-                'ROLE_HR_ADMIN',
-                'EMPLOYEE_READ',
-                'TEAM_LEAD_DIRECTORY_VIEW',
-                'WORKFORCE_RECORD_VIEW'
-            )
-            """)
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN','CEO')")
     @Transactional(readOnly = true)
     public List<DepartmentResponse> list() {
         return departments.findAllByOrderByNameAsc()
