@@ -1792,21 +1792,181 @@ function BookingFlow({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
     };
 
     if (submission) {
+        const awaitingVerification = submission.status === "PENDING_VERIFICATION";
+
         return (
             <main className="flow-page">
-                <header className="flow-header"><Logo /><button className="icon-button" onClick={() => onNavigate("welcome")} aria-label="Close"><X size={20} /></button></header>
-                <section className="confirmation-card glass-panel">
-                    <div className="success-icon"><Check size={32} /></div>
-                    <span className="eyebrow">Request submitted</span>
-                    <h1>We’ll take it from here.</h1>
-                    <p>{submission.status === "PENDING_VERIFICATION"
-                        ? "We emailed a six-digit OTP to verify this request before it enters approval."
-                        : "Your contact is verified. Security records arrival, then Reception routes the request to the department HR, Team Lead or Manager required for this visit."}</p>
-                    <div className="reference-box"><span>TRACKING REFERENCE</span><strong>{submission.referenceNumber}</strong><button className="button button-quiet" onClick={() => onNavigate("track")}>Track status <ArrowRight size={16} /></button></div>
-                    <div className="confirmation-grid"><div><CalendarDays size={18} /><span><small>Date</small><strong>{formatOfficeDate(submission.slotStart)}</strong></span></div><div><Clock3 size={18} /><span><small>Time</small><strong>{formatOfficeTime(submission.slotStart)}</strong></span></div><div><CircleUserRound size={18} /><span><small>Host</small><strong>{selectedHost?.displayName ?? "BrainServe host"}</strong></span></div><div><Building2 size={18} /><span><small>Location</small><strong>Hyderabad HQ</strong></span></div></div>
-                    {submission.status === "PENDING_VERIFICATION" && <form className="inline-account-form" onSubmit={verifyOtp}><label>Verification OTP<input name="otp" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required /></label><button className="button button-primary" disabled={busy}>{busy ? "Verifying…" : "Verify request"}</button></form>}
-                    {error && <div className="login-error" role="alert">{error}</div>}
-                    <button className="button button-primary button-large" onClick={() => onNavigate("welcome")}>Return to home</button>
+                <header className="flow-header">
+                    <Logo />
+
+                    <button
+                        type="button"
+                        className="icon-button"
+                        onClick={() => onNavigate("welcome")}
+                        aria-label="Close appointment confirmation"
+                    >
+                        <X size={20} />
+                    </button>
+                </header>
+
+                <section
+                    className={`confirmation-card glass-panel ${
+                        awaitingVerification ? "is-pending" : "is-verified"
+                    }`}
+                    aria-labelledby="appointment-confirmation-title"
+                >
+                    <div className="confirmation-status-icon" aria-hidden="true">
+                        {awaitingVerification
+                            ? <Mail size={29} />
+                            : <Check size={31} />
+                        }
+                    </div>
+
+                    <span className="eyebrow">
+                    {awaitingVerification
+                        ? "Email verification"
+                        : "Request verified"
+                    }
+                </span>
+
+                    <h1 id="appointment-confirmation-title">
+                        {awaitingVerification
+                            ? "Verify your appointment"
+                            : "Your request is ready for review"
+                        }
+                    </h1>
+
+                    <p className="confirmation-lead" role="status">
+                        {awaitingVerification
+                            ? "Enter the six-digit code sent to your email. Approval begins after verification."
+                            : "Your appointment has been verified. We’ll notify you when its approval status changes."
+                        }
+                    </p>
+
+                    <div className="confirmation-reference">
+                        <span>Tracking reference</span>
+                        <strong>{submission.referenceNumber}</strong>
+                    </div>
+
+                    <div
+                        className="confirmation-grid"
+                        aria-label="Appointment summary"
+                    >
+                        <div>
+                            <CalendarDays size={20} aria-hidden="true" />
+                            <span>
+                            <small>Date</small>
+                            <strong>{formatOfficeDate(submission.slotStart)}</strong>
+                        </span>
+                        </div>
+
+                        <div>
+                            <Clock3 size={20} aria-hidden="true" />
+                            <span>
+                            <small>Time</small>
+                            <strong>{formatOfficeTime(submission.slotStart)}</strong>
+                        </span>
+                        </div>
+
+                        <div>
+                            <CircleUserRound size={20} aria-hidden="true" />
+                            <span>
+                            <small>Host</small>
+                            <strong>
+                                {selectedHost?.displayName ?? "BrainServe host"}
+                            </strong>
+                        </span>
+                        </div>
+
+                        <div>
+                            <Building2 size={20} aria-hidden="true" />
+                            <span>
+                            <small>Location</small>
+                            <strong>Hyderabad HQ</strong>
+                        </span>
+                        </div>
+                    </div>
+
+                    {awaitingVerification ? (
+                        <>
+                            <form
+                                className="confirmation-otp-form"
+                                onSubmit={verifyOtp}
+                            >
+                                <div className="confirmation-otp-heading">
+                                    <label htmlFor="appointment-verification-otp">
+                                        Verification code
+                                    </label>
+
+                                    <small id="appointment-verification-help">
+                                        Enter the six-digit code from your email.
+                                    </small>
+                                </div>
+
+                                <div className="confirmation-otp-controls">
+                                    <input
+                                        id="appointment-verification-otp"
+                                        name="otp"
+                                        type="text"
+                                        inputMode="numeric"
+                                        autoComplete="one-time-code"
+                                        enterKeyHint="done"
+                                        pattern="[0-9]{6}"
+                                        minLength={6}
+                                        maxLength={6}
+                                        aria-describedby="appointment-verification-help"
+                                        aria-invalid={Boolean(error)}
+                                        autoFocus
+                                        required
+                                    />
+
+                                    <button
+                                        type="submit"
+                                        className="button button-primary"
+                                        disabled={busy}
+                                    >
+                                        {busy ? "Verifying…" : "Verify appointment"}
+                                    </button>
+                                </div>
+
+                                {error && (
+                                    <div
+                                        className="confirmation-form-error"
+                                        role="alert"
+                                    >
+                                        {error}
+                                    </div>
+                                )}
+                            </form>
+
+                            <button
+                                type="button"
+                                className="confirmation-home-link"
+                                onClick={() => onNavigate("welcome")}
+                            >
+                                Return to home
+                            </button>
+                        </>
+                    ) : (
+                        <div className="confirmation-actions">
+                            <button
+                                type="button"
+                                className="button button-primary button-large"
+                                onClick={() => onNavigate("track")}
+                            >
+                                Track appointment
+                                <ArrowRight size={17} aria-hidden="true" />
+                            </button>
+
+                            <button
+                                type="button"
+                                className="button button-quiet button-large"
+                                onClick={() => onNavigate("welcome")}
+                            >
+                                Return to home
+                            </button>
+                        </div>
+                    )}
                 </section>
             </main>
         );
