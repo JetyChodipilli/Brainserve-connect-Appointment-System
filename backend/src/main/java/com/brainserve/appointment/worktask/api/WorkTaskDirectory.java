@@ -32,6 +32,9 @@ public interface WorkTaskDirectory {
             String departmentBranch,
             UUID employeeId,
             UUID teamLeadUserId,
+            UUID assignedByUserId,
+            String assignedByRole,
+            String assigneeRole,
             String title,
             String status
     ) {

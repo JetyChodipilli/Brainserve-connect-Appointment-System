@@ -5,8 +5,10 @@ import java.util.UUID;
 public interface InternalNotificationGateway {
     void sendResourceDiscussionUpdate(UUID senderUserId, UUID recipientUserId, String message);
     void sendWorkTaskUpdate(UUID senderUserId, UUID recipientUserId, String message);
-    void notifyHrOfWorkTaskApproval(UUID teamLeadUserId, UUID departmentId, String message);
-    void notifyCeoOfWorkInsightAudit(UUID hrUserId, String message);
+    void notifyHrOfWorkTaskUpdate(UUID actorUserId, UUID departmentId, String message);
+    void notifyManagerOfWorkInsightAudit(UUID hrUserId, UUID managerUserId, String message);
+    void notifyCeoOfManagerWorkInsightApproval(UUID managerUserId, String message);
+    void notifyHrOfManagerWorkInsightDecision(UUID managerUserId, UUID hrUserId, String message);
     void notifyHrOfWorkInsightDecision(UUID ceoUserId, UUID hrUserId, String message);
     void notifyCeoOfManagerVisitApproval(UUID managerUserId, String message);
     void notifyManagerOfCeoVisitDecision(UUID ceoUserId, UUID departmentId, String message);

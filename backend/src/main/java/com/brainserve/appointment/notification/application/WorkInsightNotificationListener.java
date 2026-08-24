@@ -17,7 +17,19 @@ public class WorkInsightNotificationListener {
     @Async("notificationExecutor")
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void hrAudit(WorkInsightEvents.HrAuditSubmitted event) {
-        notifications.notifyCeoOfWorkInsightAudit(event.hrUserId(), event.message());
+        notifications.notifyManagerOfWorkInsightAudit(
+                event.hrUserId(), event.managerUserId(), event.message());
+    }
+
+    @Async("notificationExecutor")
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void managerDecision(WorkInsightEvents.ManagerDecisionRecorded event) {
+        notifications.notifyHrOfManagerWorkInsightDecision(
+                event.managerUserId(), event.hrUserId(), event.message());
+        if (event.approved()) {
+            notifications.notifyCeoOfManagerWorkInsightApproval(
+                    event.managerUserId(), event.message());
+        }
     }
 
     @Async("notificationExecutor")

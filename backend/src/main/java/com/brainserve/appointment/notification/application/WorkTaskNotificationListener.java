@@ -22,7 +22,7 @@ public class WorkTaskNotificationListener {
 
     @Async("notificationExecutor")
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void hrPerformance(WorkTaskEvents.HrPerformanceNotificationRequested event) {
-        notifications.notifyHrOfWorkTaskApproval(event.teamLeadUserId(), event.departmentId(), event.message());
+    public void hrUpdate(WorkTaskEvents.HrNotificationRequested event) {
+        notifications.notifyHrOfWorkTaskUpdate(event.actorUserId(), event.departmentId(), event.message());
     }
 }

@@ -24,7 +24,7 @@ public class WorkInsightController {
     @GetMapping
     @PreAuthorize("hasAuthority('WORK_INSIGHT_READ')")
     List<WorkInsightService.Insight> list(@AuthenticationPrincipal Jwt jwt,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart) {
+                                          @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart) {
         return service.list(actor(jwt), weekStart);
     }
 
@@ -52,7 +52,15 @@ public class WorkInsightController {
     @PreAuthorize("hasRole('CEO') and hasAuthority('WORK_INSIGHT_CEO_APPROVE')")
     WorkInsightService.Insight decide(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID recordId,
                                       @Valid @RequestBody DecisionRequest request) {
-        return service.decide(actor(jwt), recordId, request.approved(), request.remarks());
+        return service.decideByCeo(actor(jwt), recordId, request.approved(), request.remarks());
+    }
+
+    @PostMapping("/{recordId}/manager-decision")
+    @PreAuthorize("hasRole('MANAGER') and hasAuthority('WORK_INSIGHT_MANAGER_APPROVE')")
+    WorkInsightService.Insight managerDecision(@AuthenticationPrincipal Jwt jwt,
+                                               @PathVariable UUID recordId,
+                                               @Valid @RequestBody DecisionRequest request) {
+        return service.decideByManager(actor(jwt), recordId, request.approved(), request.remarks());
     }
 
     private UUID actor(Jwt jwt) { return UUID.fromString(jwt.getSubject()); }

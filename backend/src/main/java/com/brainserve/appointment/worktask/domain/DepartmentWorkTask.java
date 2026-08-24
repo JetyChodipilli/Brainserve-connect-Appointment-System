@@ -22,6 +22,12 @@ public class DepartmentWorkTask extends AuditableEntity {
     private UUID employeeId;
     @Column(name = "team_lead_user_id", nullable = false)
     private UUID teamLeadUserId;
+    @Column(name = "assigned_by_user_id", nullable = false, updatable = false)
+    private UUID assignedByUserId;
+    @Column(name = "assigned_by_role", nullable = false, length = 30, updatable = false)
+    private String assignedByRole;
+    @Column(name = "assignee_role", nullable = false, length = 30, updatable = false)
+    private String assigneeRole;
     @Column(nullable = false, length = 160)
     private String title;
     @Column(nullable = false, length = 1000)
@@ -56,11 +62,15 @@ public class DepartmentWorkTask extends AuditableEntity {
 
     protected DepartmentWorkTask() {}
 
-    public DepartmentWorkTask(UUID departmentId, UUID employeeId, UUID teamLeadUserId, String title,
-                              String description, String departmentBranch, LocalDate dueDate) {
+    public DepartmentWorkTask(UUID departmentId, UUID employeeId, UUID teamLeadUserId,
+                              UUID assignedByUserId, String assignedByRole, String assigneeRole,
+                              String title, String description, String departmentBranch, LocalDate dueDate) {
         this.departmentId = departmentId;
         this.employeeId = employeeId;
         this.teamLeadUserId = teamLeadUserId;
+        this.assignedByUserId = assignedByUserId;
+        this.assignedByRole = assignedByRole;
+        this.assigneeRole = assigneeRole;
         this.title = title.trim();
         this.description = description.trim();
         this.departmentBranch = departmentBranch.trim();
@@ -89,6 +99,7 @@ public class DepartmentWorkTask extends AuditableEntity {
     }
 
     public void requestChanges(String review) {
+        requireTeamLeadReview("returned for changes");
         if (status != WorkTaskStatus.COMPLETED) invalid("returned for changes");
         status = WorkTaskStatus.CHANGES_REQUESTED;
         teamLeadReview = required(review, "A review note is required when requesting changes");
@@ -97,6 +108,7 @@ public class DepartmentWorkTask extends AuditableEntity {
     }
 
     public void approve(String review) {
+        requireTeamLeadReview("approved");
         if (status != WorkTaskStatus.COMPLETED) invalid("approved");
         status = WorkTaskStatus.APPROVED;
         teamLeadReview = normalize(review);
@@ -105,13 +117,14 @@ public class DepartmentWorkTask extends AuditableEntity {
     }
 
     public void acknowledge() {
+        requireTeamLeadReview("acknowledged");
         if (status != WorkTaskStatus.APPROVED) invalid("acknowledged");
         status = WorkTaskStatus.ACKNOWLEDGED;
         acknowledgedAt = Instant.now();
     }
 
     public void requestInsightRework(String source, String reason) {
-        if (status != WorkTaskStatus.APPROVED && status != WorkTaskStatus.ACKNOWLEDGED) {
+        if (!isReadyForHrAudit()) {
             invalid("returned by Insights for rework");
         }
         insightReviewSource = required(source, "The Insights reviewer is required");
@@ -134,7 +147,16 @@ public class DepartmentWorkTask extends AuditableEntity {
     }
 
     public boolean isOverdue(LocalDate today) {
-        return dueDate.isBefore(today) && status != WorkTaskStatus.APPROVED && status != WorkTaskStatus.ACKNOWLEDGED;
+        return dueDate.isBefore(today) && !isReadyForHrAudit();
+    }
+
+    public boolean isReadyForHrAudit() {
+        if ("TEAM_LEAD".equals(assigneeRole)) return status == WorkTaskStatus.COMPLETED;
+        return status == WorkTaskStatus.APPROVED || status == WorkTaskStatus.ACKNOWLEDGED;
+    }
+
+    public boolean requiresTeamLeadReview() {
+        return "EMPLOYEE".equals(assigneeRole);
     }
 
     public void reassignOpenTask(UUID expectedTeamLeadUserId, UUID replacementTeamLeadUserId) {
@@ -150,6 +172,15 @@ public class DepartmentWorkTask extends AuditableEntity {
                 + " while it is " + status, HttpStatus.CONFLICT);
     }
 
+    private void requireTeamLeadReview(String action) {
+        if (!requiresTeamLeadReview()) {
+            throw new BusinessException("WORK_TASK_SELF_REVIEW_NOT_ALLOWED",
+                    "An HR-assigned Team Lead worksheet cannot be " + action
+                            + " through employee review; completed work goes directly to HR audit",
+                    HttpStatus.CONFLICT);
+        }
+    }
+
     private String required(String value, String message) {
         String normalized = normalize(value);
         if (normalized == null) throw new BusinessException("WORK_TASK_REVIEW_REQUIRED", message,
@@ -162,6 +193,9 @@ public class DepartmentWorkTask extends AuditableEntity {
     public UUID getDepartmentId() { return departmentId; }
     public UUID getEmployeeId() { return employeeId; }
     public UUID getTeamLeadUserId() { return teamLeadUserId; }
+    public UUID getAssignedByUserId() { return assignedByUserId; }
+    public String getAssignedByRole() { return assignedByRole; }
+    public String getAssigneeRole() { return assigneeRole; }
     public String getTitle() { return title; }
     public String getDescription() { return description; }
     public String getDepartmentBranch() { return departmentBranch; }

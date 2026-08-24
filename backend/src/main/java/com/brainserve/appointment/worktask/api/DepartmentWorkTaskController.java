@@ -32,7 +32,7 @@ public class DepartmentWorkTaskController {
     public DepartmentWorkTaskController(DepartmentWorkTaskService service) { this.service = service; }
 
     @PostMapping
-    @PreAuthorize("hasRole('TEAM_LEAD') and hasAuthority('WORK_TASK_CREATE')")
+    @PreAuthorize("hasAnyRole('HR_ADMIN','TEAM_LEAD') and hasAuthority('WORK_TASK_CREATE')")
     TaskResponse create(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody CreateRequest request) {
         return TaskResponse.from(service.create(userId(jwt), new DepartmentWorkTaskService.CreateCommand(
                 request.employeeId(), request.title(), request.description(), request.dueDate())));
@@ -99,6 +99,7 @@ public class DepartmentWorkTaskController {
     public record UpdateRequest(@Size(max = 1000) String note) {}
     public record RequiredUpdateRequest(@NotBlank @Size(max = 1000) String note) {}
     public record TaskResponse(UUID id, UUID departmentId, UUID employeeId, UUID teamLeadUserId,
+                               UUID assignedByUserId, String assignedByRole, String assigneeRole,
                                String title, String description, String departmentBranch, LocalDate dueDate,
                                WorkTaskStatus status, String employeeUpdate, String teamLeadReview,
                                String insightReviewSource, String insightReviewReason,
@@ -106,7 +107,8 @@ public class DepartmentWorkTaskController {
                                Instant startedAt, Instant completedAt, Instant approvedAt,
                                Instant acknowledgedAt, Instant createdAt, long version) {
         static TaskResponse from(DepartmentWorkTask value) { return new TaskResponse(value.getId(),
-                value.getDepartmentId(), value.getEmployeeId(), value.getTeamLeadUserId(), value.getTitle(),
+                value.getDepartmentId(), value.getEmployeeId(), value.getTeamLeadUserId(),
+                value.getAssignedByUserId(), value.getAssignedByRole(), value.getAssigneeRole(), value.getTitle(),
                 value.getDescription(), value.getDepartmentBranch(), value.getDueDate(), value.getStatus(),
                 value.getEmployeeUpdate(), value.getTeamLeadReview(), value.getInsightReviewSource(),
                 value.getInsightReviewReason(), value.getInsightReviewRequestedAt(), value.getReworkCycle(), value.getStartedAt(),

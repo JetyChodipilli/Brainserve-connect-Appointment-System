@@ -11,7 +11,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class DepartmentWorkTaskTest {
     private DepartmentWorkTask task() {
-        return new DepartmentWorkTask(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+        UUID teamLeadUserId = UUID.randomUUID();
+        return new DepartmentWorkTask(UUID.randomUUID(), UUID.randomUUID(), teamLeadUserId,
+                teamLeadUserId, "TEAM_LEAD", "EMPLOYEE",
                 "Complete visitor workflow tests", "Validate the end-to-end approval contracts",
                 "Technology", LocalDate.now().plusDays(3));
     }
@@ -75,16 +77,35 @@ class DepartmentWorkTaskTest {
         UUID previousLead = UUID.randomUUID();
         UUID replacementLead = UUID.randomUUID();
         var open = new DepartmentWorkTask(UUID.randomUUID(), UUID.randomUUID(), previousLead,
+                previousLead, "TEAM_LEAD", "EMPLOYEE",
                 "Prepare compliance evidence", "Attach the current visitor trail", "Operations",
                 LocalDate.now().plusDays(2));
         open.reassignOpenTask(previousLead, replacementLead);
         assertThat(open.getTeamLeadUserId()).isEqualTo(replacementLead);
 
         var approved = new DepartmentWorkTask(UUID.randomUUID(), UUID.randomUUID(), previousLead,
+                previousLead, "TEAM_LEAD", "EMPLOYEE",
                 "Closed delivery", "Retain its original approval owner", "Operations", LocalDate.now());
         approved.complete("Done");
         approved.approve("Verified");
         approved.reassignOpenTask(previousLead, replacementLead);
         assertThat(approved.getTeamLeadUserId()).isEqualTo(previousLead);
+    }
+
+    @Test
+    void hrAssignedTeamLeadDeliveryGoesDirectlyToHrAuditWithoutSelfApproval() {
+        UUID teamLeadUserId = UUID.randomUUID();
+        DepartmentWorkTask task = new DepartmentWorkTask(UUID.randomUUID(), UUID.randomUUID(),
+                teamLeadUserId, UUID.randomUUID(), "HR_ADMIN", "TEAM_LEAD",
+                "Prepare weekly delivery evidence", "Attach the completed department evidence",
+                "Operations", LocalDate.now().plusDays(2));
+
+        task.start("Evidence collection started");
+        task.complete("Evidence attached");
+
+        assertThat(task.isReadyForHrAudit()).isTrue();
+        assertThatThrownBy(() -> task.approve("Self-approved"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("directly to HR audit");
     }
 }

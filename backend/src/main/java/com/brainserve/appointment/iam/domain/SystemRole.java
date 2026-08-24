@@ -64,6 +64,7 @@ public enum SystemRole {
             TEAM_LEAD_ASSIGNMENT_MANAGE,
             TEAM_LEAD_DIRECTORY_VIEW,
             WORK_TASK_READ,
+            WORK_TASK_CREATE,
             WORK_TASK_PERFORMANCE_READ,
             WORK_INSIGHT_READ,
             WORK_INSIGHT_AUDIT,
@@ -80,6 +81,7 @@ public enum SystemRole {
             INTERNAL_NOTIFICATION_SEND,
             TEAM_LEAD_DIRECTORY_VIEW,
             WORK_INSIGHT_READ,
+            WORK_INSIGHT_MANAGER_APPROVE,
             REPORT_VIEW
     )),
 

@@ -128,29 +128,57 @@ public class InternalCallNotificationService implements InternalNotificationGate
         var recipient = staff.requireActive(recipientUserId);
         boolean teamLeadToEmployee = sender.roles().contains(TEAM_LEAD) && recipient.roles().contains(EMPLOYEE);
         boolean employeeToTeamLead = sender.roles().contains(EMPLOYEE) && recipient.roles().contains(TEAM_LEAD);
-        if (!teamLeadToEmployee && !employeeToTeamLead) throw new BusinessException(
+        boolean hrToWorker = sender.roles().contains(HR)
+                && (recipient.roles().contains(EMPLOYEE) || recipient.roles().contains(TEAM_LEAD));
+        if (!teamLeadToEmployee && !employeeToTeamLead && !hrToWorker) throw new BusinessException(
                 "WORK_TASK_NOTIFICATION_ROUTE_DENIED",
-                "Work task updates are limited to the assigned Employee and Team Lead", HttpStatus.FORBIDDEN);
+                "Work task updates are limited to HR, the assigned Employee and Team Lead", HttpStatus.FORBIDDEN);
         persistAndPublish(sender, recipient, message, InternalCallNotification.MessagePriority.NORMAL,
                 InternalCallNotification.MessageCategory.WORK);
     }
 
     @Override
-    public void notifyHrOfWorkTaskApproval(UUID teamLeadUserId, UUID departmentId, String message) {
-        var sender = staff.requireActive(teamLeadUserId);
-        if (!sender.roles().contains(TEAM_LEAD)) throw new BusinessException("TEAM_LEAD_ROLE_REQUIRED",
-                "Only a Team Lead can publish a work completion signal", HttpStatus.FORBIDDEN);
+    public void notifyHrOfWorkTaskUpdate(UUID actorUserId, UUID departmentId, String message) {
+        var sender = staff.requireActive(actorUserId);
+        if (!sender.roles().contains(TEAM_LEAD) && !sender.roles().contains(EMPLOYEE)) {
+            throw new BusinessException("WORK_TASK_UPDATE_ROLE_REQUIRED",
+                    "Only an Employee or Team Lead can publish a work update to HR", HttpStatus.FORBIDDEN);
+        }
         var assigned = departmentHrs.requireForDepartment(departmentId);
+        if (assigned.hrUserId().equals(sender.userId())) return;
         persistAndPublish(sender, staff.requireActive(assigned.hrUserId()), message,
                 InternalCallNotification.MessagePriority.HIGH, InternalCallNotification.MessageCategory.WORK);
     }
 
     @Override
-    public void notifyCeoOfWorkInsightAudit(UUID hrUserId, String message) {
+    public void notifyManagerOfWorkInsightAudit(UUID hrUserId, UUID managerUserId, String message) {
         var sender = staff.requireActive(hrUserId);
         if (!sender.roles().contains(HR)) throw new BusinessException("HR_ROLE_REQUIRED",
-                "Only HR can submit a work audit to CEO", HttpStatus.FORBIDDEN);
-        broadcast(sender, Set.of(CEO), message, InternalCallNotification.MessagePriority.HIGH,
+                "Only HR can submit a work audit to a Manager", HttpStatus.FORBIDDEN);
+        var recipient = staff.requireActive(managerUserId);
+        if (!recipient.roles().contains(MANAGER)) throw new BusinessException("MANAGER_ROLE_REQUIRED",
+                "The work audit recipient is not an active Manager", HttpStatus.CONFLICT);
+        persistAndPublish(sender, recipient, message, InternalCallNotification.MessagePriority.HIGH,
+                InternalCallNotification.MessageCategory.INSIGHT);
+    }
+
+    @Override
+    public void notifyCeoOfManagerWorkInsightApproval(UUID managerUserId, String message) {
+        var sender = staff.requireActive(managerUserId);
+        if (!sender.roles().contains(MANAGER)) throw new BusinessException("MANAGER_ROLE_REQUIRED",
+                "Only a Manager can route a work audit to the CEO", HttpStatus.FORBIDDEN);
+        persistAndPublish(sender, staff.requireChiefExecutive(), message,
+                InternalCallNotification.MessagePriority.HIGH,
+                InternalCallNotification.MessageCategory.INSIGHT);
+    }
+
+    @Override
+    public void notifyHrOfManagerWorkInsightDecision(UUID managerUserId, UUID hrUserId, String message) {
+        var sender = staff.requireActive(managerUserId);
+        if (!sender.roles().contains(MANAGER)) throw new BusinessException("MANAGER_ROLE_REQUIRED",
+                "Only a Manager can publish a Manager work-audit decision", HttpStatus.FORBIDDEN);
+        persistAndPublish(sender, staff.requireActive(hrUserId), message,
+                InternalCallNotification.MessagePriority.HIGH,
                 InternalCallNotification.MessageCategory.INSIGHT);
     }
 
@@ -188,10 +216,12 @@ public class InternalCallNotificationService implements InternalNotificationGate
     public void notifyTeamLeadOfWorkInsightRework(UUID reviewerUserId, UUID teamLeadUserId, String message) {
         var sender = staff.requireActive(reviewerUserId);
         var recipient = staff.requireActive(teamLeadUserId);
-        if ((!sender.roles().contains(HR) && !sender.roles().contains(CEO))
+        if ((!sender.roles().contains(HR) && !sender.roles().contains(MANAGER)
+                && !sender.roles().contains(CEO))
                 || !recipient.roles().contains(TEAM_LEAD)) {
             throw new BusinessException("WORK_INSIGHT_REWORK_ROUTE_DENIED",
-                    "Insights rework can only be routed by HR or CEO to the assigned Team Lead", HttpStatus.FORBIDDEN);
+                    "Insights rework can only be routed by HR, Manager or CEO to the assigned Team Lead",
+                    HttpStatus.FORBIDDEN);
         }
         persistAndPublish(sender, recipient, systemMessage(message),
                 InternalCallNotification.MessagePriority.URGENT, InternalCallNotification.MessageCategory.INSIGHT);
@@ -396,7 +426,7 @@ public class InternalCallNotificationService implements InternalNotificationGate
         if (!recipient.roles().contains(TEAM_LEAD)) throw new BusinessException("TEAM_LEAD_ROLE_REQUIRED",
                 "The appointment recipient is not an active Team Lead", HttpStatus.UNPROCESSABLE_ENTITY);
         persistAndPublish(sender, recipient, "HR routed visitor " + visitorName + " (" + reference
-                + ") for Team Lead approval: " + purpose, InternalCallNotification.MessagePriority.HIGH,
+                        + ") for Team Lead approval: " + purpose, InternalCallNotification.MessagePriority.HIGH,
                 InternalCallNotification.MessageCategory.VISITOR);
     }
 
@@ -417,10 +447,10 @@ public class InternalCallNotificationService implements InternalNotificationGate
             String stage = status.equals("PENDING_TEAM_LEAD_APPROVAL")
                     ? "HR verified this visit; Team Lead approval is pending"
                     : status.equals("APPROVED") ? "Team Lead approved this visit"
-                    : status.equals("REJECTED") ? "Team Lead rejected this visit" : status.replace('_', ' ');
+                      : status.equals("REJECTED") ? "Team Lead rejected this visit" : status.replace('_', ' ');
             persistAndPublish(sender, recipient, "Visitor card " + reference + ": " + visitorName + " from "
-                    + company + " is coming to meet you for " + purpose + ". Scheduled " + slotStart
-                    + (contact.isBlank() ? ". " : ". Contact " + contact + ". ") + stage + ".",
+                            + company + " is coming to meet you for " + purpose + ". Scheduled " + slotStart
+                            + (contact.isBlank() ? ". " : ". Contact " + contact + ". ") + stage + ".",
                     InternalCallNotification.MessagePriority.HIGH,
                     InternalCallNotification.MessageCategory.VISITOR);
         });
@@ -527,7 +557,7 @@ public class InternalCallNotificationService implements InternalNotificationGate
                                                StaffCommunicationDirectory.StaffMember recipient) {
         boolean departmentBound = sender.roles().contains(MANAGER) && recipient.roles().contains(HR)
                 || sender.roles().contains(HR)
-                    && (recipient.roles().contains(TEAM_LEAD) || recipient.roles().contains(EMPLOYEE))
+                && (recipient.roles().contains(TEAM_LEAD) || recipient.roles().contains(EMPLOYEE))
                 || sender.roles().contains(TEAM_LEAD) && recipient.roles().contains(HR)
                 || sender.roles().contains(EMPLOYEE) && recipient.roles().contains(HR);
         if (!departmentBound) return true;

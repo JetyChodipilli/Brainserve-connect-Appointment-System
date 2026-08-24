@@ -8,7 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -65,7 +65,7 @@ class AccountProvisioningIntegrationTest {
 
     @Autowired MockMvc mockMvc;
     @Autowired ObjectMapper mapper;
-    @MockBean EmailService emailService;
+    @MockitoBean  EmailService emailService;
     private final Map<String, String> pendingPasswords = new ConcurrentHashMap<>();
 
     @BeforeEach
