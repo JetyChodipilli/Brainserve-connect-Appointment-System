@@ -1,5 +1,7 @@
 "use client";
 
+// BrainServe Connect role-scoped workspace client.
+
 import {
     ArrowLeft,
     ArrowRight,
@@ -169,6 +171,151 @@ type DepartmentRosterPage = {
 };
 
 type Department = { id: string; code: string; name: string; active: boolean; version: number };
+
+const DEPARTMENT_LOGO_ALIASES: Record<string, string> = {
+    EXEC: "executive-leadership",
+    EXECUTIVE: "executive-leadership",
+    EXECUTIVE_OFFICE: "executive-leadership",
+    LEADERSHIP: "executive-leadership",
+    EXECUTIVE_LEADERSHIP: "executive-leadership",
+    HR: "human-resources",
+    HUMAN_RESOURCES: "human-resources",
+    FIN: "finance-accounting",
+    FINANCE: "finance-accounting",
+    ACCOUNTS: "finance-accounting",
+    ACCOUNTING: "finance-accounting",
+    FINANCE_ACCOUNTING: "finance-accounting",
+    PRO: "operations-delivery",
+    OPS: "operations-delivery",
+    OPERATIONS: "operations-delivery",
+    DELIVERY: "operations-delivery",
+    PRODUCTION: "operations-delivery",
+    PRODUCTION_DEPARTMENT: "operations-delivery",
+    OPERATIONS_DELIVERY: "operations-delivery",
+    SALES: "sales",
+    MKT: "marketing",
+    MARKETING: "marketing",
+    RD: "research-development",
+    R_D: "research-development",
+    RND: "research-development",
+    RESEARCH_DEVELOPMENT: "research-development",
+    IT: "information-technology",
+    TECHNOLOGY: "information-technology",
+    IT_TECHNOLOGY: "information-technology",
+    CS: "customer-support",
+    SUPPORT: "customer-support",
+    CUSTOMER_SERVICE: "customer-support",
+    CUSTOMER_SUPPORT: "customer-support",
+    CUSTOMER_SERVICE_SUPPORT: "customer-support",
+    LEGAL: "legal-compliance",
+    COMPLIANCE: "legal-compliance",
+    LEGAL_COMPLIANCE: "legal-compliance",
+    PROC: "purchasing-procurement",
+    PROCUREMENT: "purchasing-procurement",
+    PURCHASING: "purchasing-procurement",
+    PURCHASING_PROCUREMENT: "purchasing-procurement",
+    ADMIN: "administration",
+    ADMINISTRATION: "administration",
+    PD: "product-development",
+    PRODUCT: "product-development",
+    PRODUCT_DEPT: "product-development",
+    PRODUCT_DEV: "product-development",
+    PRODUCT_DEPARTMENT: "product-development",
+    PRODUCT_ENGINEERING: "product-development",
+    PRODUCT_MANAGEMENT: "product-development",
+    PRODUCT_DEVELOPMENT: "product-development",
+};
+
+const PREFERRED_DEPARTMENT_CODES: Record<string, string> = {
+    EXECUTIVE: "EXEC",
+    EXECUTIVE_OFFICE: "EXEC",
+    EXECUTIVE_LEADERSHIP: "EXEC",
+    HUMAN_RESOURCES: "HR",
+    FINANCE: "FIN",
+    FINANCE_ACCOUNTING: "FIN",
+    OPERATIONS: "OPS",
+    OPERATIONS_DELIVERY: "OPS",
+    PRODUCTION: "PRO",
+    PRODUCTION_DEPARTMENT: "PRO",
+    SALES: "SALES",
+    MARKETING: "MKT",
+    RESEARCH_DEVELOPMENT: "RND",
+    INFORMATION_TECHNOLOGY: "IT",
+    IT_TECHNOLOGY: "IT",
+    CUSTOMER_SERVICE: "SUPPORT",
+    CUSTOMER_SUPPORT: "SUPPORT",
+    CUSTOMER_SERVICE_SUPPORT: "SUPPORT",
+    LEGAL_COMPLIANCE: "LEGAL",
+    PURCHASING_PROCUREMENT: "PROC",
+    ADMINISTRATION: "ADMIN",
+    PRODUCT: "PRODUCT",
+    PRODUCT_DEPT: "PRODUCT",
+    PRODUCT_DEPARTMENT: "PRODUCT",
+    PRODUCT_ENGINEERING: "PRODUCT",
+    PRODUCT_MANAGEMENT: "PRODUCT",
+    PRODUCT_DEVELOPMENT: "PRODUCT",
+};
+
+function normalizeDepartmentLogoToken(value: string) {
+    return value.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function normalizeDepartmentCode(value: string) {
+    return normalizeDepartmentLogoToken(value).slice(0, 20);
+}
+
+function normalizeDepartmentName(value: string) {
+    return value.trim().replace(/\s+/g, " ");
+}
+
+function suggestDepartmentCode(name: string) {
+    const normalizedName = normalizeDepartmentLogoToken(name);
+    if (!normalizedName) return "";
+    const preferred = PREFERRED_DEPARTMENT_CODES[normalizedName];
+    if (preferred) return preferred;
+    const words = normalizedName.split("_").filter(Boolean);
+    return (words.length > 1 ? words.map((word) => word[0]).join("") : words[0]).slice(0, 20);
+}
+
+function departmentLogoKey(department: Department) {
+    const code = normalizeDepartmentLogoToken(department.code);
+    const name = normalizeDepartmentLogoToken(department.name);
+    return DEPARTMENT_LOGO_ALIASES[name]
+        ?? DEPARTMENT_LOGO_ALIASES[code]
+        ?? code.toLowerCase().replaceAll("_", "-");
+}
+
+function DepartmentLogo({ department, size = 30 }: { department: Department; size?: number }) {
+    const source = `/department-logos/${departmentLogoKey(department)}.png`;
+    const [failedSource, setFailedSource] = useState<string | null>(null);
+    const fallbackLabel = (normalizeDepartmentCode(department.code || department.name) || "DEPT")
+        .split("_")
+        .filter(Boolean)
+        .map((part) => part[0])
+        .join("")
+        .slice(0, 3);
+
+    if (failedSource === source) {
+        return <span
+            className="department-logo-fallback"
+            aria-hidden="true"
+            style={{ width: size, height: size, fontSize: Math.max(8, Math.round(size * .28)) }}
+        >{fallbackLabel}</span>;
+    }
+
+    return <Image
+        key={source}
+        src={source}
+        alt=""
+        aria-hidden="true"
+        width={size}
+        height={size}
+        unoptimized
+        onError={() => setFailedSource(source)}
+        style={{ width: size, height: size, objectFit: "contain" }}
+    />;
+}
+
 type DashboardMetrics = { awaitingApproval: number; activeVisits: number; visitorsInside: number;
     totalEmployees: number; activeEmployees: number };
 type AccessRecord = { id: string; appointmentId: string; visitorName: string; badgeNumber: string;
@@ -1300,7 +1447,7 @@ const rolePermissions: Record<Role, View[]> = {
     CEO: ["overview", "appointments", "insights", "employees", "terminations", "account-lifecycle", "visitors", "notifications", "organization", "reports", "audit", "settings", "profile"],
     Manager: ["overview", "appointments", "insights", "employees", "visitors", "notifications", "organization", "reports", "profile"],
     "Team Lead": ["overview", "work", "employees", "notifications", "organization", "reports", "profile"],
-    Employee: ["overview", "work", "employees", "notifications", "reports", "profile"],
+    Employee: ["overview", "work", "employees", "notifications", "organization", "reports", "profile"],
     Reception: ["overview", "appointments", "visitors", "notifications", "reports", "profile"],
     Security: ["overview", "appointments", "visitors", "reports", "profile"],
     "System Admin": ["overview", "insights", "account-lifecycle", "reports", "audit", "logs", "settings", "profile"],
@@ -2441,45 +2588,87 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
                     hostNames = new Map(nextEmployees.map((item) => [item.uuid ?? item.id, item.name]));
                 } catch (reason) { errors.push(reason instanceof ApiError ? reason.message : "Your Team Lead workspace could not be loaded."); }
             } else if (!["Security", "System Admin"].includes(role)) {
-                try {
-                    const [employeePage, departmentList, summaryList, assignmentList, hrAssignmentList, managerAssignmentList] = await Promise.all([
-                        brainServeApi.employees(), ["HR Admin", "Manager"].includes(role)
-                            ? brainServeApi.visibleDepartments() : brainServeApi.departments(),
-                        ["CEO", "HR Admin", "Manager"].includes(role) ? brainServeApi.departmentEmployeeSummary() : Promise.resolve([]),
-                        ["CEO", "HR Admin"].includes(role) ? brainServeApi.teamLeadAssignments() : Promise.resolve([]),
-                        ["CEO", "HR Admin"].includes(role) ? brainServeApi.departmentHrAssignments() : Promise.resolve([]),
-                        ["CEO", "System Admin"].includes(role)
-                            ? brainServeApi.managerAssignments()
-                            : role === "Manager"
-                                ? brainServeApi.myManagerAssignment().then((assignment) => [{
-                                    id: assignment.assignmentId,
-                                    departmentId: assignment.departmentId,
-                                    managerUserId: assignment.managerUserId,
-                                    managerEmployeeId: assignment.managerEmployeeId,
-                                    active: true,
-                                    assignedByUserId: "",
-                                    assignedAt: "",
-                                    endedByUserId: null,
-                                    endedAt: null,
-                                }])
-                                : Promise.resolve([]),
-                    ]);
-                    if (!active) return;
+                const departmentRequest = ["HR Admin", "Manager", "Employee"].includes(role)
+                    ? brainServeApi.visibleDepartments()
+                    : role === "Reception"
+                        ? brainServeApi.publicDepartments()
+                        : brainServeApi.departments();
+                const [employeeResult, departmentResult, summaryResult, assignmentResult,
+                    hrAssignmentResult, managerAssignmentResult] = await Promise.allSettled([
+                    brainServeApi.employees(),
+                    departmentRequest,
+                    ["CEO", "HR Admin", "Manager"].includes(role)
+                        ? brainServeApi.departmentEmployeeSummary()
+                        : Promise.resolve([]),
+                    ["CEO", "HR Admin"].includes(role)
+                        ? brainServeApi.teamLeadAssignments()
+                        : Promise.resolve([]),
+                    ["CEO", "HR Admin"].includes(role)
+                        ? brainServeApi.departmentHrAssignments()
+                        : Promise.resolve([]),
+                    role === "CEO"
+                        ? brainServeApi.managerAssignments()
+                        : role === "Manager"
+                            ? brainServeApi.myManagerAssignment().then((assignment) => [{
+                                id: assignment.assignmentId,
+                                departmentId: assignment.departmentId,
+                                managerUserId: assignment.managerUserId,
+                                managerEmployeeId: assignment.managerEmployeeId,
+                                active: true,
+                                assignedByUserId: "",
+                                assignedAt: "",
+                                endedByUserId: null,
+                                endedAt: null,
+                            }])
+                            : Promise.resolve([]),
+                ]);
+                if (!active) return;
+
+                const departmentList = departmentResult.status === "fulfilled"
+                    ? departmentResult.value
+                    : [];
+                if (departmentResult.status === "fulfilled") {
                     setDepartments(departmentList);
-                    setDepartmentSummaries(summaryList);
-                    setTeamLeadAssignments(assignmentList);
-                    setDepartmentHrAssignments(hrAssignmentList);
-                    setManagerAssignments(managerAssignmentList);
+                } else {
+                    errors.push(departmentResult.reason instanceof ApiError
+                        ? departmentResult.reason.message
+                        : "The department directory could not be loaded.");
+                }
+
+                if (summaryResult.status === "fulfilled") setDepartmentSummaries(summaryResult.value);
+                else errors.push(summaryResult.reason instanceof ApiError
+                    ? summaryResult.reason.message : "Department totals could not be loaded.");
+                if (assignmentResult.status === "fulfilled") setTeamLeadAssignments(assignmentResult.value);
+                else errors.push(assignmentResult.reason instanceof ApiError
+                    ? assignmentResult.reason.message : "Team Lead assignments could not be loaded.");
+                if (hrAssignmentResult.status === "fulfilled") setDepartmentHrAssignments(hrAssignmentResult.value);
+                else errors.push(hrAssignmentResult.reason instanceof ApiError
+                    ? hrAssignmentResult.reason.message : "Department HR assignments could not be loaded.");
+                if (managerAssignmentResult.status === "fulfilled") setManagerAssignments(managerAssignmentResult.value);
+                else errors.push(managerAssignmentResult.reason instanceof ApiError
+                    ? managerAssignmentResult.reason.message : "Manager assignments could not be loaded.");
+
+                if (employeeResult.status === "fulfilled") {
                     const departmentNames = new Map(departmentList.map((item) => [item.id, item.name]));
-                    const nextEmployees: Employee[] = employeePage.content.map((item) => ({
-                        id: item.employeeNumber, uuid: item.id, departmentId: item.departmentId,
-                        name: item.displayName, initials: visitorInitials(item.displayName),
-                        role: item.designation, department: departmentNames.get(item.departmentId) ?? "Unassigned", email: item.officialEmail,
-                        lifecycleProtected: item.lifecycleProtected, status: employeeStatusLabel(item.status),
+                    const nextEmployees: Employee[] = employeeResult.value.content.map((item) => ({
+                        id: item.employeeNumber,
+                        uuid: item.id,
+                        departmentId: item.departmentId,
+                        name: item.displayName,
+                        initials: visitorInitials(item.displayName),
+                        role: item.designation,
+                        department: departmentNames.get(item.departmentId) ?? "Assigned department",
+                        email: item.officialEmail,
+                        lifecycleProtected: item.lifecycleProtected,
+                        status: employeeStatusLabel(item.status),
                     }));
                     setEmployees(nextEmployees);
                     hostNames = new Map(nextEmployees.map((item) => [item.uuid ?? item.id, item.name]));
-                } catch (reason) { errors.push(reason instanceof ApiError ? reason.message : "Employee data could not be loaded."); }
+                } else {
+                    errors.push(employeeResult.reason instanceof ApiError
+                        ? employeeResult.reason.message
+                        : "Employee data could not be loaded.");
+                }
             }
             if (role === "Security" || role === "Reception") {
                 try {
@@ -2659,6 +2848,16 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
 
     const permittedNav = navItems.filter((item) => rolePermissions[role].includes(item.id));
     const currentEmployee = employees.find((employee) => employee.email.toLowerCase() === userEmail.toLowerCase());
+    const isDepartmentDirectoryRole = ["HR Admin", "Manager", "Team Lead", "Employee"].includes(role);
+    const employeeDirectoryScopeId = isDepartmentDirectoryRole
+        ? currentEmployee?.departmentId ?? (departments.length === 1 ? departments[0].id : undefined)
+        : undefined;
+    const searchableEmployees = useMemo(() => isDepartmentDirectoryRole
+            ? employeeDirectoryScopeId
+                ? employees.filter((employee) => employee.departmentId === employeeDirectoryScopeId)
+                : []
+            : employees,
+        [employeeDirectoryScopeId, employees, isDepartmentDirectoryRole]);
     const unassignedEmployeeAccounts = staffAccounts.filter((account) => account.enabled && account.status === "ACTIVE"
         && account.roles.length === 1 && account.roles[0] === "ROLE_EMPLOYEE" && !account.employeeId
         && !employees.some((employee) => employee.email.toLowerCase() === account.email.toLowerCase()));
@@ -2671,12 +2870,12 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
             `${item.visitor} ${item.company} ${item.host} ${item.purpose} ${item.referenceNumber ?? ""}`.toLowerCase().includes(query))
             .map((item) => ({ id: `appointment-${item.id}`, view: (["Employee", "Team Lead"] as Role[]).includes(role) ? "notifications" as View : "appointments" as View,
                 title: item.visitor, detail: `${item.type} · ${item.referenceNumber ?? item.host}` }));
-        const employeeResults = employees.filter((item) =>
+        const employeeResults = searchableEmployees.filter((item) =>
             `${item.name} ${item.email} ${item.id} ${item.role} ${item.department}`.toLowerCase().includes(query))
             .map((item) => ({ id: `employee-${item.id}`, view: "employees" as View,
                 title: item.name, detail: `${item.role} · ${item.department}` }));
         return [...appointmentResults, ...employeeResults].slice(0, 8);
-    }, [appointments, employees, globalSearch, role]);
+    }, [appointments, globalSearch, role, searchableEmployees]);
     const updateAppointment = (id: string, status: AppointmentStatus, patch: Partial<Pick<Appointment,
         "managerApprovalActorId" | "managerDecisionAt" | "managerDecisionRemarks"
         | "ceoApprovalActorId" | "ceoDecisionAt" | "ceoDecisionRemarks">> = {}) =>
@@ -2923,9 +3122,19 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
     };
 
     const createDepartment = async (code: string, name: string) => {
+        const normalizedCode = normalizeDepartmentCode(code);
+        const normalizedName = normalizeDepartmentName(name);
+        if (normalizedCode.length < 2) fail("Department code must contain at least two letters or numbers.");
+        if (normalizedName.length < 2) fail("Department name must contain at least two characters.");
+        if (departments.some((item) => item.code.toUpperCase() === normalizedCode)) {
+            fail(`Department code ${normalizedCode} is already in use.`);
+        }
+        if (departments.some((item) => item.name.trim().toLowerCase() === normalizedName.toLowerCase())) {
+            fail(`A department named ${normalizedName} already exists.`);
+        }
         const created = isBackendConfigured
-            ? await brainServeApi.createDepartment(code, name)
-            : { id: newClientId(), code: code.toUpperCase(), name, active: true, version: 0 };
+            ? await brainServeApi.createDepartment(normalizedCode, normalizedName)
+            : { id: newClientId(), code: normalizedCode, name: normalizedName, active: true, version: 0 };
         setDepartments((items) => {
             const updated = [...items, created];
             if (!isBackendConfigured) writeDemoDepartments(updated);
@@ -3362,17 +3571,51 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
             <header className="app-header"><div className="global-search"><button className="icon-button menu-button" onClick={() => setSidebarOpen(true)}><Menu size={20} /></button><Search size={18} /><input aria-label="Search" value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} placeholder="Search people, visits or reference…" />{globalSearch.trim().length >= 2 && <div className="global-search-results glass-panel">{globalSearchResults.map((result) => <button key={result.id} onClick={() => { setView(result.view); setGlobalSearch(""); }}><Search size={14} /><span><strong>{result.title}</strong><small>{result.detail}</small></span><ChevronRight size={14} /></button>)}{globalSearchResults.length === 0 && <div><strong>No matching workspace records</strong><small>Try a name, email or appointment reference.</small></div>}</div>}</div><div className="header-actions"><button type="button" className={`live-status ${isBackendConfigured ? `live-${liveState}` : "live-preview"}`} onClick={requestWorkspaceRefresh} title={lastLiveUpdate ? `Last synchronized ${lastLiveUpdate.toLocaleTimeString("en-IN")}` : "Refresh BrainServe Connect data"}><span />{isBackendConfigured ? liveState === "live" ? "Live" : liveState === "connecting" ? "Connecting" : liveState === "offline" ? "Offline" : "Reconnecting" : "Preview"}<RotateCcw size={13} /></button>{rolePermissions[role].includes("notifications") && <button className="icon-button notification-button" onClick={() => setView("notifications")} aria-label={`Open notifications${unreadNotifications ? `, ${unreadNotifications} unread` : ""}`}><Bell size={19} />{unreadNotifications > 0 && <span />}</button>}</div></header>
             <div className="app-content">
                 {operationError && <div className="login-error workspace-error" role="alert">{operationError}</div>}
-                {view === "overview" && (role === "System Admin"
-                    ? <AccountProvisioningPanel key={`overview:${workspaceRevision}`} role={role} departments={departments}
-                                                onDecision={refreshStaffAccounts} />
-                    : ["CEO", "HR Admin"].includes(role)
-                        ? <><Overview key={`overview:${workspaceRevision}:operations`} role={role} appointments={appointments}
-                                      metrics={metrics} onNavigate={setView} onRegister={() => setVisitModal(true)}
-                                      decideAppointment={decideAppointment} />
-                            <AccountProvisioningPanel key={`overview:${workspaceRevision}:accounts`} compact role={role}
-                                                      departments={departments} onDecision={refreshStaffAccounts} /></>
-                        : <Overview key={`overview:${workspaceRevision}`} role={role} appointments={appointments} metrics={metrics} onNavigate={setView}
-                                    onRegister={() => setVisitModal(true)} decideAppointment={decideAppointment} />)}
+                {view === "overview" && (
+                    role === "System Admin" ? (
+                        <>
+                            <AccountProvisioningPanel
+                                key={`overview:${workspaceRevision}`}
+                                role={role}
+                                departments={departments}
+                                onDecision={refreshStaffAccounts}
+                            />
+                            <AccountRecoveryApprovalPanel
+                                generated={approvedRecovery}
+                                onGeneratedChange={setApprovedRecovery}
+                            />
+                        </>
+                    ) : ["CEO", "HR Admin"].includes(role) ? (
+                        <>
+                            <Overview
+                                key={`overview:${workspaceRevision}:operations`}
+                                role={role}
+                                appointments={appointments}
+                                metrics={metrics}
+                                onNavigate={setView}
+                                onRegister={() => setVisitModal(true)}
+                                decideAppointment={decideAppointment}
+                            />
+                            <AccountProvisioningPanel
+                                key={`overview:${workspaceRevision}:accounts`}
+                                compact
+                                role={role}
+                                departments={departments}
+                                onDecision={refreshStaffAccounts}
+                            />
+                        </>
+                    ) : (
+                        <Overview
+                            key={`overview:${workspaceRevision}`}
+                            role={role}
+                            appointments={appointments}
+                            metrics={metrics}
+                            onNavigate={setView}
+                            onRegister={() => setVisitModal(true)}
+                            decideAppointment={decideAppointment}
+                        />
+                    )
+                )}
                 {view === "appointments" && <AppointmentsView key={`appointments:${workspaceRevision}`} role={role} appointments={appointments} currentEmployee={currentEmployee}
                                                               onCreate={() => setVisitModal(true)} decideAppointment={decideAppointment}
                                                               onSecurityIntake={setSecurityIntakeAppointment} decideReceptionVisit={decideReceptionVisit}
@@ -5826,7 +6069,7 @@ function EmployeesView({
     const [page, setPage] = useState(0);
     const [pageCount, setPageCount] = useState(1);
     const [totalElements, setTotalElements] = useState(
-        isBackendConfigured && ["HR Admin", "Team Lead"].includes(role)
+        isBackendConfigured && ["HR Admin", "Manager", "Team Lead", "Employee"].includes(role)
             ? 0
             : employees.length,
     );
@@ -5837,7 +6080,7 @@ function EmployeesView({
     const [pageError, setPageError] = useState("");
     const [busyEmployeeId, setBusyEmployeeId] = useState("");
     const [recordEmployee, setRecordEmployee] = useState<Employee | null>(null);
-    const departmentScoped = role === "HR Admin" || role === "Team Lead";
+    const departmentScoped = ["HR Admin", "Manager", "Team Lead", "Employee"].includes(role);
     const scopedDepartment = departmentScoped
         ? departments.find((department) => department.id === currentEmployee?.departmentId)
         ?? (departments.length === 1 ? departments[0] : undefined)
@@ -5857,6 +6100,7 @@ function EmployeesView({
                 : loadedEmployees,
         [departmentScoped, loadedEmployees, scopedDepartmentId],
     );
+    const displayedTotalElements = isBackendConfigured ? totalElements : visibleEmployees.length;
     const departmentCount = new Set(
         visibleEmployees.map((employee) => employee.department),
     ).size;
@@ -5887,11 +6131,13 @@ function EmployeesView({
                 setPageCount(1);
                 setTotalElements(0);
                 setPageBusy(false);
-                setPageError(
-                    role === "Team Lead"
-                        ? "Your Team Lead department assignment could not be resolved. Ask HR to confirm the active assignment, then sign out and sign in again."
-                        : "Your HR department assignment could not be resolved. Ask System Admin or CEO to confirm the active assignment, then sign out and sign in again.",
-                );
+                setPageError(role === "Team Lead"
+                    ? "Your Team Lead department assignment could not be resolved. Ask HR to confirm the active assignment, then sign out and sign in again."
+                    : role === "HR Admin"
+                        ? "Your HR department assignment could not be resolved. Ask System Admin or CEO to confirm the active assignment, then sign out and sign in again."
+                        : role === "Manager"
+                            ? "Your Manager department assignment could not be resolved. Ask the CEO to confirm the active assignment, then sign out and sign in again."
+                            : "Your employee department assignment could not be resolved. Ask HR to complete your employee profile, then sign out and sign in again.");
                 return;
             }
             try {
@@ -5994,7 +6240,7 @@ function EmployeesView({
                 }
                 detail={
                     directoryOnly
-                        ? "Find public contact details for colleagues across BrainServe."
+                        ? "Find public contact details for colleagues in your assigned department."
                         : teamLeadView
                             ? "A department-scoped directory for the people and appointments you lead."
                             : "Recruit, place on leave, record notice/resignation and archive access without losing history."
@@ -6057,7 +6303,7 @@ function EmployeesView({
             )}
             <section className="employee-summary">
                 <div>
-                    <strong>{totalElements}</strong>
+                    <strong>{displayedTotalElements}</strong>
                     <span>Matching records</span>
                 </div>
                 <i />
@@ -6704,27 +6950,36 @@ function OrganizationView({ role, userEmail, departments, employees, staffAccoun
     const [executiveDepartmentId, setExecutiveDepartmentId] = useState("");
     const [executiveBusy, setExecutiveBusy] = useState(false);
     const [message, setMessage] = useState("");
+    const [departmentDraftName, setDepartmentDraftName] = useState("");
+    const [departmentDraftCode, setDepartmentDraftCode] = useState("");
+    const [departmentCodeEdited, setDepartmentCodeEdited] = useState(false);
+    const [departmentCreateBusy, setDepartmentCreateBusy] = useState(false);
+    const [departmentFieldsTouched, setDepartmentFieldsTouched] = useState({ name: false, code: false });
     const demoVisibleDepartments = useMemo(() => {
         if (isBackendConfigured) return [];
         if (role === "CEO") return departments;
         const account = [...readDemoAccounts(), ...staffAccounts].find((item) => item.email.toLowerCase() === userEmail.toLowerCase());
         const accountId = account && "id" in account ? account.id : account?.userId;
+        const employeeDepartmentId = employees.find((item) =>
+            item.email.toLowerCase() === userEmail.toLowerCase())?.departmentId;
         const assignmentDepartmentId = role === "HR Admin"
             ? readDemoDepartmentHrAssignments().find((item) => item.active && item.hrUserId === accountId)?.departmentId
             : role === "Manager"
                 ? readDemoManagerAssignments().find((item) => item.active && item.managerUserId === accountId)?.departmentId
                 : readDemoTeamLeadAssignments().find((item) => item.active && item.teamLeadUserId === accountId)?.departmentId;
-        return departments.filter((item) => item.id === assignmentDepartmentId);
-    }, [departments, role, staffAccounts, userEmail]);
-    const visibleDepartments = isBackendConfigured ? backendVisibleDepartments : demoVisibleDepartments;
+        return departments.filter((item) => item.id === (assignmentDepartmentId ?? employeeDepartmentId));
+    }, [departments, employees, role, staffAccounts, userEmail]);
+    const visibleDepartments = isBackendConfigured
+        ? role === "CEO" ? departments : backendVisibleDepartments
+        : demoVisibleDepartments;
     const executiveEmployee = role === "CEO" ? employees.find((item) => item.email.toLowerCase() === userEmail.toLowerCase()) : undefined;
     useEffect(() => {
         let active = true;
-        if (!isBackendConfigured) return () => { active = false; };
+        if (!isBackendConfigured || role === "CEO") return () => { active = false; };
         brainServeApi.visibleDepartments().then((items) => { if (active) setBackendVisibleDepartments(items); })
             .catch((reason) => { if (active) { setBackendVisibleDepartments([]); setError(reason instanceof Error ? reason.message : "Your department scope could not be loaded."); } });
         return () => { active = false; };
-    }, []);
+    }, [role]);
     const selectedExecutiveDepartmentId = executiveDepartmentId || executiveEmployee?.departmentId
         || visibleDepartments.find((item) => item.active)?.id || "";
     const effectiveExpandedDepartment = expandedDepartment === undefined && role !== "CEO" && visibleDepartments.length === 1
@@ -6741,6 +6996,25 @@ function OrganizationView({ role, userEmail, departments, employees, staffAccoun
     const canToggleDepartment = role === "CEO";
     const canManageLead = role === "HR Admin";
     const canManageHr = role === "CEO";
+    const normalizedDraftName = normalizeDepartmentName(departmentDraftName);
+    const normalizedDraftCode = normalizeDepartmentCode(departmentDraftCode);
+    const departmentNameError = normalizedDraftName.length < 2
+        ? "Enter a department name with at least two characters."
+        : departments.some((item) => item.name.trim().toLowerCase() === normalizedDraftName.toLowerCase())
+            ? "A department with this name already exists."
+            : "";
+    const departmentCodeError = normalizedDraftCode.length < 2
+        ? "Use at least two uppercase letters or numbers."
+        : departments.some((item) => item.code.toUpperCase() === normalizedDraftCode)
+            ? `The code ${normalizedDraftCode} is already in use.`
+            : "";
+    const departmentPreview: Department = {
+        id: "department-logo-preview",
+        code: normalizedDraftCode || suggestDepartmentCode(normalizedDraftName) || "DEPT",
+        name: normalizedDraftName || "New department",
+        active: true,
+        version: 0,
+    };
     const loadDepartmentPage = useCallback(async (department: Department, pageNumber = 0, query = "") => {
         if (!isBackendConfigured) {
             const matching = employees.filter((item) => belongsToDepartment(item, department)
@@ -6786,22 +7060,34 @@ function OrganizationView({ role, userEmail, departments, employees, staffAccoun
         return () => window.clearTimeout(timer);
     }, [effectiveExpandedDepartment, loadDepartmentPage, rosters, visibleDepartments]);
     const create = async (event: FormEvent<HTMLFormElement>) => {
-        event.preventDefault(); setError("");
+        event.preventDefault(); setError(""); setMessage("");
+        setDepartmentFieldsTouched({ name: true, code: true });
         const form = event.currentTarget;
         const data = new FormData(form);
+        if (departmentNameError || departmentCodeError) {
+            setError(departmentNameError || departmentCodeError);
+            return;
+        }
+        setDepartmentCreateBusy(true);
         try {
-            const created = await onCreate(String(data.get("code")), String(data.get("name")));
+            const created = await onCreate(normalizedDraftCode, normalizedDraftName);
             if (role === "CEO" && data.get("joinExecutive") === "yes") {
                 const joined = await onJoinExecutiveDepartment({ departmentId: created.id, phoneNumber: "",
                     designation: "Chief Executive Officer", joiningDate: officeToday() });
                 if (!joined) fail("The department was created, but the CEO profile could not be registered to it.");
                 setExecutiveDepartmentId(created.id);
             }
-            form.reset(); setShowForm(false); setMessage(data.get("joinExecutive") === "yes"
+            form.reset();
+            setDepartmentDraftName("");
+            setDepartmentDraftCode("");
+            setDepartmentCodeEdited(false);
+            setDepartmentFieldsTouched({ name: false, code: false });
+            setShowForm(false); setMessage(data.get("joinExecutive") === "yes"
                 ? "Department created and registered as your CEO department."
                 : "Department created successfully.");
         }
         catch (reason) { setError(reason instanceof Error ? reason.message : "The department could not be created."); }
+        finally { setDepartmentCreateBusy(false); }
     };
     const joinExecutive = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault(); setExecutiveBusy(true); setError(""); setMessage("");
@@ -6816,7 +7102,11 @@ function OrganizationView({ role, userEmail, departments, employees, staffAccoun
     return <>
         <PageTitle eyebrow="ORGANIZATION INTELLIGENCE" title="Your company, clearly connected"
                    detail={role === "CEO" ? "Open any department to see its live PostgreSQL-backed team directory and take role-controlled actions." : "Your directory is restricted to the department assigned to your account."}
-                   action={canCreateDepartment && <button className="button button-primary" onClick={() => setShowForm((value) => !value)}><Plus size={17} /> Add department</button>} />
+                   action={canCreateDepartment && <button type="button" className="button button-primary"
+                                                          aria-expanded={showForm} aria-controls="create-department-form"
+                                                          onClick={() => { setShowForm((value) => !value); setError(""); setMessage(""); }}>
+                       {showForm ? <X size={17} /> : <Plus size={17} />} {showForm ? "Close form" : "Add department"}
+                   </button>} />
         <section className="org-overview glass-panel">
             <div><span>Departments</span><strong>{visibleDepartments.length}</strong><small>{visibleDepartments.filter((item) => item.active).length} visible active units</small></div>
             <i /><div><span>Total workforce</span><strong>{totalEmployees}</strong><small>{role === "CEO" ? "Across the organization" : "Within your assigned department"}</small></div>
@@ -6833,13 +7123,56 @@ function OrganizationView({ role, userEmail, departments, employees, staffAccoun
             <input type="hidden" name="joiningDate" value={officeToday()} />
             <button className="button button-primary" disabled={executiveBusy || !selectedExecutiveDepartmentId}><BadgeCheck size={16} />{executiveBusy ? "Saving…" : executiveEmployee ? "Move my profile" : "Register my profile"}</button>
         </form>}
-        {showForm && <form className="staff-create-form panel glass-panel org-create-form" onSubmit={create}>
-            <label>Department code<input name="code" minLength={2} maxLength={20} pattern="[A-Za-z0-9_-]+" placeholder="e.g. PRODUCT" required /></label>
-            <label>Department name<input name="name" maxLength={120} placeholder="e.g. Product Engineering" required /></label>
+        {showForm && <form id="create-department-form" className="staff-create-form panel glass-panel org-create-form" onSubmit={create}>
+            <label className="field-stack">Department name
+                <input id="new-department-name" name="name" value={departmentDraftName} minLength={2} maxLength={120}
+                       placeholder="e.g. Product Development" autoComplete="organization-title" required
+                       aria-invalid={departmentFieldsTouched.name && Boolean(departmentNameError)}
+                       aria-describedby="new-department-name-help"
+                       onBlur={() => setDepartmentFieldsTouched((current) => ({
+                           ...current, name: true, code: departmentCodeEdited ? current.code : true,
+                       }))}
+                       onChange={(event) => {
+                           const value = event.target.value;
+                           setDepartmentDraftName(value);
+                           if (!departmentCodeEdited) setDepartmentDraftCode(suggestDepartmentCode(value));
+                       }} />
+                <small id="new-department-name-help">Use the full business name shown across Organization and employee records.</small>
+                {departmentFieldsTouched.name && departmentNameError && <small role="alert">{departmentNameError}</small>}
+            </label>
+            <label className="field-stack">Department code
+                <input id="new-department-code" name="code" value={departmentDraftCode} minLength={2} maxLength={20}
+                       pattern="[A-Z0-9_]+" placeholder="e.g. PRODUCT" autoCapitalize="characters" spellCheck={false} required
+                       aria-invalid={departmentFieldsTouched.code && Boolean(departmentCodeError)}
+                       aria-describedby="new-department-code-help"
+                       onBlur={() => {
+                           setDepartmentDraftCode(normalizeDepartmentCode(departmentDraftCode));
+                           setDepartmentFieldsTouched((current) => ({ ...current, code: true }));
+                       }}
+                       onChange={(event) => {
+                           setDepartmentCodeEdited(true);
+                           setDepartmentDraftCode(event.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "").slice(0, 20));
+                       }} />
+                <small id="new-department-code-help">Stable internal identifier. Names such as Production suggest PRO; Product Development suggests PRODUCT.</small>
+                {departmentFieldsTouched.code && departmentCodeError && <small role="alert">{departmentCodeError}</small>}
+            </label>
+            {departmentFieldsTouched.name && !departmentNameError && !departmentCodeError && <div className="team-lead-badge">
+                <DepartmentLogo department={departmentPreview} size={28} />
+                <span><small>LOGO PREVIEW</small><strong>{departmentPreview.name}</strong></span>
+            </div>}
             <label className="executive-create-option"><input type="checkbox" name="joinExecutive" value="yes" /> Create and register this as my CEO department</label>
-            <button className="button button-primary">Create department</button>
+            <div className="form-actions">
+                <button type="button" className="button button-secondary" onClick={() => {
+                    setShowForm(false); setError(""); setDepartmentDraftName(""); setDepartmentDraftCode("");
+                    setDepartmentCodeEdited(false); setDepartmentFieldsTouched({ name: false, code: false });
+                }}>Cancel</button>
+                <button type="submit" className="button button-primary"
+                        disabled={departmentCreateBusy || Boolean(departmentNameError) || Boolean(departmentCodeError)}>
+                    {departmentCreateBusy ? "Creating…" : "Create department"}
+                </button>
+            </div>
         </form>}
-        {message && <div className="success-banner"><CheckCircle2 size={17} />{message}</div>}
+        {message && <div className="success-banner" role="status"><CheckCircle2 size={17} />{message}</div>}
         {error && <div className="login-error" role="alert">{error}</div>}
         {visibleDepartments.length === 0 && <div className="empty-state org-scope-empty"><Building2 size={28} /><strong>No department is assigned</strong><small>Ask the CEO or System Admin to complete your role and department assignment.</small></div>}
         <div className={`org-grid${role === "CEO" ? "" : " org-grid-focused"}`}>{visibleDepartments.map((department) => {
@@ -6849,6 +7182,7 @@ function OrganizationView({ role, userEmail, departments, employees, staffAccoun
             const activeCount = summary?.activeEmployees ?? fallbackMembers.filter((item) => item.status === "Active").length;
             const routingDepartment = ["EXEC", "HR"].includes(department.code.toUpperCase());
             const expanded = effectiveExpandedDepartment === department.id;
+            const rosterId = `department-roster-${department.id}`;
             const loadedRoster = rosters[department.id];
             const liveMemberById = new Map(fallbackMembers.map((employee) => [employee.uuid ?? employee.id, employee]));
             const roster = loadedRoster
@@ -6859,7 +7193,7 @@ function OrganizationView({ role, userEmail, departments, employees, staffAccoun
             const hrAssignment = departmentHrAssignments.find((item) => item.departmentId === department.id && item.active);
             const hrAccount = hrAssignment ? staffAccounts.find((item) => item.userId === hrAssignment.hrUserId) : undefined;
             return <article className={`org-card glass-panel${expanded ? " expanded" : ""}`} key={department.id}>
-                <div className="org-card-head"><span className="dept-icon"><Building2 size={21} /></span>
+                <div className="org-card-head"><span className="dept-icon"><DepartmentLogo department={department} /></span>
                     <span className="org-status"><i className={department.active ? "active" : ""} />{department.active ? "Active" : "Inactive"}</span></div>
                 <small>{department.code}</small><h3>{department.name}</h3>
                 <p><CircleUserRound size={15} /> {routingDepartment ? "Protected appointment-routing department" : "BrainServe operating department"}</p>
@@ -6867,13 +7201,14 @@ function OrganizationView({ role, userEmail, departments, employees, staffAccoun
                 <div className="team-lead-badge"><UserCog size={16} /><span><small>DEPARTMENT HR</small><strong>{hrAccount?.fullName ?? (hrAssignment ? "Assigned HR Admin" : "Not assigned")}</strong></span></div>
                 <div className="org-card-metrics"><span><strong>{memberCount}</strong><small>People</small></span><span><strong>{activeCount}</strong><small>Active</small></span><span><strong>{summary?.onLeaveEmployees ?? fallbackMembers.filter((item) => item.status === "On leave").length}</strong><small>On leave</small></span></div>
                 <div className="org-card-actions">
-                    <button className="button button-secondary" onClick={() => void openDepartment(department)} aria-expanded={expanded}><Users size={15} /> {expanded ? "Close team" : "View team"}<ChevronRight size={14} /></button>
-                    {canAddEmployee && <button className="button button-secondary" disabled={!department.active} onClick={() => onAddEmployee(department.id)}><UserPlus size={15} /> Add employee</button>}
-                    {canToggleDepartment && <button className={department.active ? "button button-reject" : "button button-approve"} disabled={routingDepartment}
+                    <button type="button" className="button button-secondary" onClick={() => void openDepartment(department)}
+                            aria-expanded={expanded} aria-controls={rosterId}><Users size={15} /> {expanded ? "Close team" : "View team"}<ChevronRight size={14} /></button>
+                    {canAddEmployee && <button type="button" className="button button-secondary" disabled={!department.active} onClick={() => onAddEmployee(department.id)}><UserPlus size={15} /> Add employee</button>}
+                    {canToggleDepartment && <button type="button" className={department.active ? "button button-reject" : "button button-approve"} disabled={routingDepartment}
                                                     title={routingDepartment ? "Required for CEO and HR appointment routing" : `${department.active ? "Deactivate" : "Activate"} ${department.name}`}
                                                     onClick={() => void onToggle(department)}>{department.active ? "Deactivate" : "Activate"}</button>}
                 </div>
-                {expanded && <section className="department-roster">
+                {expanded && <section id={rosterId} className="department-roster">
                     <header><div><span>DEPARTMENT DIRECTORY</span><h4>{department.name} team</h4></div><b>{memberCount} people</b></header>
                     <form className="inline-account-form" onSubmit={(event) => {
                         event.preventDefault();
@@ -10028,14 +10363,20 @@ function VisitRegistrationModal({
         (visitType === "Emergency visit" &&
             Boolean(selectedHost && inferredCategory(selectedHost) === "CEO"));
     return (
-        <div className="modal-backdrop" role="presentation">
+        <div
+            className="modal-backdrop"
+            role="presentation"
+            onMouseDown={(event) => {
+                if (event.target === event.currentTarget) onClose();
+            }}
+        >
             <section
-                className="modal glass-panel visit-modal"
+                className="modal glass-panel visit-modal walk-in-modal"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="visit-modal-title"
             >
-                <header>
+                <header className="visit-modal-header">
                     <div>
             <span>
               {securityMode ? "SECURITY WALK-IN" : "VISITOR REGISTRATION"}
@@ -10052,6 +10393,7 @@ function VisitRegistrationModal({
                         </p>
                     </div>
                     <button
+                        type="button"
                         className="icon-button"
                         onClick={onClose}
                         aria-label="Close visitor form"
@@ -10059,292 +10401,312 @@ function VisitRegistrationModal({
                         <X size={19} />
                     </button>
                 </header>
-                <form onSubmit={submit}>
+                <form className="visit-modal-form" onSubmit={submit} aria-busy={busy}>
                     <div className="visit-modal-body">
-                        <div className="modal-form-grid">
-                        <label>
-                            Visitor name
-                            <input
-                                name="visitorName"
-                                required
-                                minLength={2}
-                                maxLength={170}
-                                placeholder="Full name"
-                            />
-                        </label>
-                        <label>
-                            Company
-                            <input
-                                name="visitorCompany"
-                                maxLength={170}
-                                placeholder="Company or Independent"
-                            />
-                        </label>
-                        <label>
-                            Visitor email
-                            <input
-                                name="visitorEmail"
-                                type="email"
-                                required
-                                placeholder="visitor@example.com"
-                            />
-                        </label>
-                        <label>
-                            Mobile number
-                            <input
-                                name="visitorPhone"
-                                required
-                                minLength={8}
-                                maxLength={32}
-                                placeholder="+91 98765 43210"
-                            />
-                        </label>
-                        <label>
-                            Visit type
-                            <select
-                                value={visitType}
-                                onChange={(event) => {
-                                    const next = event.target.value;
-                                    setVisitType(next);
-                                    setRoutingDepartmentId("");
-                                    setRequestedEmployeeId("");
-                                    setDirectoryEmployees([]);
-                                    setEmployeeQuery("");
-                                    setHostEmployeeId("");
-                                    setVisitDate(
-                                        appointmentDates(8, next === "Emergency visit")[0],
-                                    );
-                                    setSlots([]);
-                                    setSlotStart("");
-                                    setLoadingSlots(false);
-                                    setError("");
-                                }}
-                            >
-                                <option>Interview</option>
-                                <option>Emergency visit</option>
-                                <option>Employee meeting</option>
-                                <option>HR visit</option>
-                                <option>CEO visit</option>
-                                <option>Client meeting</option>
-                            </select>
-                        </label>
-                        <label>
-                            Routing department
-                            <select
-                                value={routingDepartmentId}
-                                onChange={(event) => {
-                                    setRoutingDepartmentId(event.target.value);
-                                    setRequestedEmployeeId("");
-                                    setDirectoryEmployees([]);
-                                    setEmployeeQuery("");
-                                    setHostEmployeeId("");
-                                    setSlots([]);
-                                    setSlotStart("");
-                                }}
-                                required
-                            >
-                                <option value="">Select department</option>
-                                {departmentOptions.map((department) => (
-                                    <option value={department.id} key={department.id}>
-                                        {department.name}
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
-                        {visitType === "Employee meeting" && (
-                            <>
+                        <section className="visit-form-section" aria-labelledby="visit-details-heading">
+                            <div className="visit-form-section-heading">
+                                <span>{securityMode ? "WALK-IN DETAILS" : "VISIT DETAILS"}</span>
+                                <strong id="visit-details-heading">Visitor and appointment routing</strong>
+                                <small>Complete the visitor details, select the department, then choose an eligible host and time.</small>
+                            </div>
+                            <div className="modal-form-grid">
                                 <label>
-                                    Find employee
-                                    <div className="directory-search-row">
-                                        <input
-                                            value={employeeQuery}
-                                            onChange={(event) => setEmployeeQuery(event.target.value)}
-                                            placeholder="Name or employee ID"
-                                        />
-                                        <button
-                                            type="button"
-                                            className="button button-secondary"
-                                            disabled={
-                                                employeeDirectoryLoading || !routingDepartmentId
-                                            }
-                                            onClick={() =>
-                                                void loadDepartmentEmployees(employeeQuery)
-                                            }
-                                        >
-                                            <Search size={15} />
-                                            {employeeDirectoryLoading ? "Searching…" : "Search"}
-                                        </button>
-                                    </div>
+                                    Visitor name
+                                    <input
+                                        name="visitorName"
+                                        required
+                                        minLength={2}
+                                        maxLength={170}
+                                        placeholder="Full name"
+                                    />
                                 </label>
                                 <label>
-                                    Employee to meet
-                                    <select
-                                        value={requestedEmployeeId}
-                                        onChange={(event) =>
-                                            setRequestedEmployeeId(event.target.value)
-                                        }
+                                    Company
+                                    <input
+                                        name="visitorCompany"
+                                        maxLength={170}
+                                        placeholder="Company or Independent"
+                                    />
+                                </label>
+                                <label>
+                                    Visitor email
+                                    <input
+                                        name="visitorEmail"
+                                        type="email"
                                         required
-                                        disabled={employeeDirectoryLoading}
+                                        placeholder="visitor@example.com"
+                                    />
+                                </label>
+                                <label>
+                                    Mobile number
+                                    <input
+                                        name="visitorPhone"
+                                        required
+                                        minLength={8}
+                                        maxLength={32}
+                                        placeholder="+91 98765 43210"
+                                    />
+                                </label>
+                                <label>
+                                    Visit type
+                                    <select
+                                        value={visitType}
+                                        onChange={(event) => {
+                                            const next = event.target.value;
+                                            setVisitType(next);
+                                            setRoutingDepartmentId("");
+                                            setRequestedEmployeeId("");
+                                            setDirectoryEmployees([]);
+                                            setEmployeeQuery("");
+                                            setHostEmployeeId("");
+                                            setVisitDate(
+                                                appointmentDates(8, next === "Emergency visit")[0],
+                                            );
+                                            setSlots([]);
+                                            setSlotStart("");
+                                            setLoadingSlots(false);
+                                            setError("");
+                                        }}
+                                    >
+                                        <option>Interview</option>
+                                        <option>Emergency visit</option>
+                                        <option>Employee meeting</option>
+                                        <option>HR visit</option>
+                                        <option>CEO visit</option>
+                                        <option>Client meeting</option>
+                                    </select>
+                                </label>
+                                <label>
+                                    Routing department
+                                    <select
+                                        value={routingDepartmentId}
+                                        onChange={(event) => {
+                                            setRoutingDepartmentId(event.target.value);
+                                            setRequestedEmployeeId("");
+                                            setDirectoryEmployees([]);
+                                            setEmployeeQuery("");
+                                            setHostEmployeeId("");
+                                            setSlots([]);
+                                            setSlotStart("");
+                                        }}
+                                        required
+                                    >
+                                        <option value="">Select department</option>
+                                        {departmentOptions.map((department) => (
+                                            <option value={department.id} key={department.id}>
+                                                {department.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {departmentOptions.length === 0 && (
+                                        <small className="field-help" role="status">
+                                            No active department is currently available. Refresh the workspace or ask the CEO to activate a department.
+                                        </small>
+                                    )}
+                                </label>
+                                {visitType === "Employee meeting" && (
+                                    <>
+                                        <label>
+                                            Find employee
+                                            <div className="directory-search-row">
+                                                <input
+                                                    value={employeeQuery}
+                                                    onChange={(event) => setEmployeeQuery(event.target.value)}
+                                                    placeholder="Name or employee ID"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    className="button button-secondary"
+                                                    disabled={
+                                                        employeeDirectoryLoading || !routingDepartmentId
+                                                    }
+                                                    onClick={() =>
+                                                        void loadDepartmentEmployees(employeeQuery)
+                                                    }
+                                                >
+                                                    <Search size={15} />
+                                                    {employeeDirectoryLoading ? "Searching…" : "Search"}
+                                                </button>
+                                            </div>
+                                        </label>
+                                        <label>
+                                            Employee to meet
+                                            <select
+                                                value={requestedEmployeeId}
+                                                onChange={(event) =>
+                                                    setRequestedEmployeeId(event.target.value)
+                                                }
+                                                required
+                                                disabled={employeeDirectoryLoading}
+                                            >
+                                                <option value="">
+                                                    {employeeDirectoryLoading
+                                                        ? "Loading department employees…"
+                                                        : "Select department employee"}
+                                                </option>
+                                                {directoryEmployees.map((employee) => (
+                                                    <option
+                                                        value={employee.uuid ?? employee.id}
+                                                        key={employee.uuid ?? employee.id}
+                                                    >
+                                                        {employee.name} · {employee.role}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </label>
+                                    </>
+                                )}
+                                <label>
+                                    Eligible host
+                                    <select
+                                        value={hostEmployeeId}
+                                        onChange={(event) => {
+                                            setHostEmployeeId(event.target.value);
+                                            setSlots([]);
+                                            setSlotStart("");
+                                            setLoadingSlots(Boolean(event.target.value));
+                                            setError("");
+                                        }}
+                                        required
                                     >
                                         <option value="">
-                                            {employeeDirectoryLoading
-                                                ? "Loading department employees…"
-                                                : "Select department employee"}
+                                            {eligibleEmployees.length
+                                                ? "Select an eligible active host"
+                                                : `No assigned ${requiredCategory ?? "CEO or HR"} host available`}
                                         </option>
-                                        {directoryEmployees.map((employee) => (
+                                        {eligibleEmployees.map((employee) => (
                                             <option
                                                 value={employee.uuid ?? employee.id}
                                                 key={employee.uuid ?? employee.id}
                                             >
-                                                {employee.name} · {employee.role}
+                                                {employee.name} · {employee.role} · {employee.department}
                                             </option>
                                         ))}
                                     </select>
                                 </label>
-                            </>
-                        )}
-                        <label>
-                            Eligible host
-                            <select
-                                value={hostEmployeeId}
-                                onChange={(event) => {
-                                    setHostEmployeeId(event.target.value);
-                                    setSlots([]);
-                                    setSlotStart("");
-                                    setLoadingSlots(Boolean(event.target.value));
-                                    setError("");
-                                }}
-                                required
-                            >
-                                <option value="">
-                                    {eligibleEmployees.length
-                                        ? "Select an eligible active host"
-                                        : `No assigned ${requiredCategory ?? "CEO or HR"} host available`}
-                                </option>
-                                {eligibleEmployees.map((employee) => (
-                                    <option
-                                        value={employee.uuid ?? employee.id}
-                                        key={employee.uuid ?? employee.id}
-                                    >
-                                        {employee.name} · {employee.role} · {employee.department}
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
-                        <label>
-                            Appointment date
-                            <select
-                                value={visitDate}
-                                onChange={(event) => {
-                                    setVisitDate(event.target.value);
-                                    setSlots([]);
-                                    setSlotStart("");
-                                    setLoadingSlots(Boolean(hostEmployeeId));
-                                    setError("");
-                                }}
-                            >
-                                {dates.map((date) => (
-                                    <option key={date} value={date}>
-                                        {date === officeToday() ? "Today · " : ""}
-                                        {formatOfficeDate(officeDateTimeToIso(date, "12:00"))}
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
-                        <label>
-                            Available time
-                            <select
-                                value={slotStart}
-                                onChange={(event) => setSlotStart(event.target.value)}
-                                required
-                                disabled={loadingSlots || !hostEmployeeId}
-                            >
-                                <option value="">
-                                    {loadingSlots
-                                        ? "Loading availability…"
-                                        : slots.length
-                                            ? "Select a time"
-                                            : "No future slots available"}
-                                </option>
-                                {slots.map((slot) => (
-                                    <option key={slot.start} value={slot.start}>
-                                        {formatOfficeTime(slot.start)}
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
-                        {securityMode && (
-                            <>
                                 <label>
-                                    Identity document
-                                    <select name="identityDocumentType" defaultValue="AADHAAR">
-                                        <option value="AADHAAR">Aadhaar</option>
-                                        <option value="PASSPORT">Passport</option>
-                                        <option value="DRIVING_LICENCE">Driving licence</option>
-                                        <option value="OTHER">Other</option>
+                                    Appointment date
+                                    <select
+                                        value={visitDate}
+                                        onChange={(event) => {
+                                            setVisitDate(event.target.value);
+                                            setSlots([]);
+                                            setSlotStart("");
+                                            setLoadingSlots(Boolean(hostEmployeeId));
+                                            setError("");
+                                        }}
+                                    >
+                                        {dates.map((date) => (
+                                            <option key={date} value={date}>
+                                                {date === officeToday() ? "Today · " : ""}
+                                                {formatOfficeDate(officeDateTimeToIso(date, "12:00"))}
+                                            </option>
+                                        ))}
                                     </select>
                                 </label>
                                 <label>
-                                    Document last four
-                                    <input
-                                        name="identityDocumentLastFour"
-                                        pattern="[A-Za-z0-9]{4}"
-                                        minLength={4}
-                                        maxLength={4}
-                                        placeholder="1234"
+                                    Available time
+                                    <select
+                                        value={slotStart}
+                                        onChange={(event) => setSlotStart(event.target.value)}
                                         required
-                                    />
+                                        disabled={loadingSlots || !hostEmployeeId}
+                                    >
+                                        <option value="">
+                                            {loadingSlots
+                                                ? "Loading availability…"
+                                                : slots.length
+                                                    ? "Select a time"
+                                                    : "No future slots available"}
+                                        </option>
+                                        {slots.map((slot) => (
+                                            <option key={slot.start} value={slot.start}>
+                                                {formatOfficeTime(slot.start)}
+                                            </option>
+                                        ))}
+                                    </select>
                                 </label>
+                                {securityMode && (
+                                    <>
+                                        <label>
+                                            Identity document
+                                            <select name="identityDocumentType" defaultValue="AADHAAR">
+                                                <option value="AADHAAR">Aadhaar</option>
+                                                <option value="PASSPORT">Passport</option>
+                                                <option value="DRIVING_LICENCE">Driving licence</option>
+                                                <option value="OTHER">Other</option>
+                                            </select>
+                                        </label>
+                                        <label>
+                                            Document last four
+                                            <input
+                                                name="identityDocumentLastFour"
+                                                pattern="[A-Za-z0-9]{4}"
+                                                minLength={4}
+                                                maxLength={4}
+                                                placeholder="1234"
+                                                required
+                                            />
+                                        </label>
+                                        <label className="full-field">
+                                            Security notes
+                                            <textarea
+                                                name="notes"
+                                                maxLength={500}
+                                                placeholder="Identity matched, items carried, or other arrival notes"
+                                            />
+                                        </label>
+                                    </>
+                                )}
                                 <label className="full-field">
-                                    Security notes
+                                    Purpose
                                     <textarea
-                                        name="notes"
-                                        maxLength={500}
-                                        placeholder="Identity matched, items carried, or other arrival notes"
+                                        name="purpose"
+                                        required
+                                        minLength={5}
+                                        maxLength={1000}
+                                        placeholder="Reason for interview or meeting"
                                     />
                                 </label>
-                            </>
-                        )}
-                        <label className="full-field">
-                            Purpose
-                            <textarea
-                                name="purpose"
-                                required
-                                minLength={5}
-                                maxLength={1000}
-                                placeholder="Reason for interview or meeting"
-                            />
-                        </label>
-                    </div>
-                    <div className="approval-chain">
+                            </div>
+                        </section>
+                        <div className="visit-notification-note" role="status">
+                            <MessageSquare size={18} aria-hidden="true" />
+                            <span>
+                                <strong>{securityMode ? "Reception notification" : "Connected workflow notification"}</strong>
+                                <small>{securityMode
+                                    ? "Submitting this walk-in sends Reception a BrainServe Internal Calls update for verification."
+                                    : "Security and Reception receive the visit workflow updates needed for arrival and verification."}</small>
+                            </span>
+                        </div>
+                        <div className="approval-chain">
             <span>
               <IdCard size={16} /> Security intake
             </span>
-                        <i />
-                        <span>
+                            <i />
+                            <span>
               <BadgeCheck size={16} /> Reception verify
             </span>
-                        <i />
-                        <span>
+                            <i />
+                            <span>
               <UserCog size={16} />{" "}
-                            {ceoApprovalRoute ? "Department Manager" : "Department HR"}
+                                {ceoApprovalRoute ? "Department Manager" : "Department HR"}
             </span>
-                        {ceoApprovalRoute && (
-                            <>
-                                <i />
-                                <span>
+                            {ceoApprovalRoute && (
+                                <>
+                                    <i />
+                                    <span>
                   <ShieldCheck size={16} /> CEO final approval
                 </span>
-                            </>
-                        )}
-                    </div>
+                                </>
+                            )}
+                        </div>
                         {error && (
                             <div className="login-error" role="alert">
                                 {error}
                             </div>
                         )}
                     </div>
-
                     <div className="modal-actions">
                         <button
                             type="button"
@@ -10354,6 +10716,7 @@ function VisitRegistrationModal({
                             Cancel
                         </button>
                         <button
+                            type="submit"
                             className="button button-primary"
                             disabled={busy || loadingSlots || !slotStart}
                         >

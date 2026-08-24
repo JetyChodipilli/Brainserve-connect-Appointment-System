@@ -34,11 +34,17 @@ jobs:
       - name: Run lint
         run: npm run lint
 
-      - name: Run tests
-        run: npm test
+      - name: Run source and regression tests
+        run: node --test tests/*.test.mjs
 
       - name: Build frontend
         run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: Run browser tests
+        run: npm run test:e2e
 
   backend:
     name: Backend
@@ -67,3 +73,4 @@ jobs:
 
       - name: Compile and test backend
         run: mvn --batch-mode --no-transfer-progress clean verify
+

@@ -34,7 +34,7 @@ test("organization actions remain permission controlled and transactional", () =
 });
 
 test("System Admin account lifecycle filters use database departments instead of preview fixtures", () => {
-  assert.ok(departmentController.includes("'WORKFORCE_RECORD_VIEW'"));
+  assert.ok(departmentController.includes("hasAnyRole('SYSTEM_ADMIN','CEO')"));
   assert.ok(sourceIncludes(app, "isBackendConfigured ? [] : readDemoDepartments()"));
   assert.ok(app.includes('if (role === "System Admin")'));
   assert.ok(sourceIncludes(
@@ -44,12 +44,14 @@ test("System Admin account lifecycle filters use database departments instead of
   assert.ok(app.includes("setDepartments(departmentList)"));
 });
 
-test("CEO sees all departments while HR, Manager and Team Lead receive only their assigned department", () => {
+test("CEO sees all departments while HR, Manager, Team Lead and Employee receive only their assigned department", () => {
   assert.ok(organizationScopeController.includes('@GetMapping("/visible")'));
-  assert.ok(organizationScopeController.includes("hasAnyRole('CEO','HR_ADMIN','MANAGER','TEAM_LEAD')"));
+  assert.ok(organizationScopeController.includes("hasAnyRole('CEO','HR_ADMIN','MANAGER','TEAM_LEAD','EMPLOYEE')"));
   assert.ok(organizationScopeController.includes("departmentHrs.requireForUser(userId).departmentId()"));
   assert.ok(organizationScopeController.includes("teamLeads.requireForUser(userId).departmentId()"));
   assert.ok(organizationScopeController.includes("managers.requireForUser(userId).departmentId()"));
+  assert.ok(organizationScopeController.includes('jwt.getClaimAsString("employeeId")'));
+  assert.ok(organizationScopeController.includes("employees.departmentIdForEmployee(UUID.fromString(employeeId))"));
   assert.ok(organizationScopeController.includes("organization.allDepartments()"));
   assert.ok(api.includes("visibleDepartments()"));
   assert.ok(api.includes('"/departments/visible"'));
@@ -120,3 +122,4 @@ test("department assignment accepts registered employees with a single name and 
   assert.ok(app.includes('initialDepartmentId={employeeDepartmentId} error={operationError}'));
   assert.ok(app.includes('{error && <div className="login-error" role="alert">{error}</div>}'));
 });
+
