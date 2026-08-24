@@ -27,18 +27,24 @@ const migration = read(
 const branchMigration = read(
     "backend/src/main/resources/db/migration/V20__work_task_department_branch.sql",
 );
+const governanceMigration = read(
+    "backend/src/main/resources/db/migration/V47__work_task_manager_governance.sql",
+);
 const roles = read(
     "backend/src/main/java/com/brainserve/appointment/iam/domain/SystemRole.java",
 );
 const api = read("app/lib/api.ts");
 const app = read("app/brainserve-app.tsx");
 
-test("Employee and Team Lead use a work board instead of appointment navigation", () => {
+test("Employee, Team Lead and HR use the governed work board", () => {
   assert.ok(
       app.includes('"Team Lead": ["overview", "work"'),
   );
   assert.ok(
       app.includes('Employee: ["overview", "work"'),
+  );
+  assert.ok(
+      app.includes('"HR Admin": ["overview", "appointments", "work"'),
   );
   assert.ok(
       app.includes('{ id: "work", label: "Work board"'),
@@ -210,9 +216,7 @@ test("task endpoints use explicit role permissions", () => {
     );
   }
 
-  assert.ok(
-      controller.includes("hasRole('TEAM_LEAD')"),
-  );
+  assert.ok(controller.includes("hasAnyRole('HR_ADMIN','TEAM_LEAD')"));
   assert.ok(
       controller.includes("hasRole('EMPLOYEE')"),
   );
@@ -232,7 +236,7 @@ test("Kafka task and HR performance messages publish only after commit", () => {
   );
   assert.ok(listener.includes("sendWorkTaskUpdate"));
   assert.ok(
-      listener.includes("notifyHrOfWorkTaskApproval"),
+      listener.includes("notifyHrOfWorkTaskUpdate"),
   );
   assert.ok(
       notificationService.includes(
@@ -258,6 +262,10 @@ test("PostgreSQL and frontend use department branches, performance and all workf
   }
 
   assert.ok(migration.includes("ix_work_task_department"));
+  for (const field of ["assigned_by_user_id", "assigned_by_role", "assignee_role"]) {
+    assert.ok(governanceMigration.includes(field), `governance migration missing ${field}`);
+  }
+  assert.ok(governanceMigration.includes("PENDING_MANAGER_APPROVAL"));
   assert.ok(
       branchMigration.includes("department_branch"),
   );

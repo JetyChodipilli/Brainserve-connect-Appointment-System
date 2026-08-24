@@ -298,6 +298,8 @@ export type ResourceDiscussion = { id: string; requestedByUserId: string; hrReci
   hrResponse: string | null; scheduledAt: string | null; hrDecidedAt: string | null;
   completedAt: string | null; createdAt: string; version: number };
 export type WorkTask = { id: string; departmentId: string; employeeId: string; teamLeadUserId: string;
+  assignedByUserId: string; assignedByRole: "HR_ADMIN" | "TEAM_LEAD";
+  assigneeRole: "EMPLOYEE" | "TEAM_LEAD";
   title: string; description: string; departmentBranch: string; dueDate: string;
   status: "ASSIGNED" | "IN_PROGRESS" | "COMPLETED" | "CHANGES_REQUESTED" | "INSIGHT_REWORK_REQUESTED" | "APPROVED" | "ACKNOWLEDGED";
   employeeUpdate: string | null; teamLeadReview: string | null; startedAt: string | null;
@@ -310,9 +312,11 @@ export type TeamLeadPerformance = { teamLeadUserId: string; departmentId: string
   overdueTasks: number; completionRate: number; lastApprovedAt: string | null };
 export type WorkInsight = { auditRecordId: string | null; workTaskId: string; weekStart: string;
   departmentId: string; departmentName: string; employeeId: string; employeeNumber: string;
-  employeeName: string; teamLeadUserId: string; teamLeadName: string; taskTitle: string;
-  taskStatus: WorkTask["status"]; auditStatus: "NOT_AUDITED" | "HR_REWORK_REQUESTED" | "PENDING_CEO_APPROVAL" | "CEO_APPROVED" | "CEO_REWORK_REQUESTED" | "REWORK_ASSIGNED";
-  hrAuditedAt: string | null; ceoDecidedAt: string | null; ceoRemarks: string | null;
+  employeeName: string; teamLeadUserId: string; teamLeadName: string;
+  assignedByRole: WorkTask["assignedByRole"]; assigneeRole: WorkTask["assigneeRole"]; taskTitle: string;
+  taskStatus: WorkTask["status"]; auditStatus: "NOT_AUDITED" | "HR_REWORK_REQUESTED" | "PENDING_MANAGER_APPROVAL" | "MANAGER_REWORK_REQUESTED" | "PENDING_CEO_APPROVAL" | "CEO_APPROVED" | "CEO_REWORK_REQUESTED" | "REWORK_ASSIGNED";
+  hrAuditedAt: string | null; managerDecidedAt: string | null; managerRemarks: string | null;
+  ceoDecidedAt: string | null; ceoRemarks: string | null;
   reworkRequestedByRole: string | null; reworkReason: string | null; reworkRequestedAt: string | null;
   teamLeadReworkGuidance: string | null; teamLeadRespondedAt: string | null; reworkCycle: number };
 export type HrLifecycleAccount = { userId: string; fullName: string; email: string; status: string; enabled: boolean };
@@ -1400,6 +1404,11 @@ export const brainServeApi = {
   },
   decideWorkInsight(recordId: string, approved: boolean, remarks = "") {
     return apiRequest<WorkInsight>(`/work-insights/${recordId}/ceo-decision`, {
+      method: "POST", body: JSON.stringify({ approved, remarks }),
+    });
+  },
+  decideManagerWorkInsight(recordId: string, approved: boolean, remarks = "") {
+    return apiRequest<WorkInsight>(`/work-insights/${recordId}/manager-decision`, {
       method: "POST", body: JSON.stringify({ approved, remarks }),
     });
   },

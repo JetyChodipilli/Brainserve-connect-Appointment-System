@@ -32,7 +32,7 @@ test("Manager-to-CEO handoff and CEO decision return are delivered through inter
   assert.match(notifications, /managers\.requireForDepartment\(departmentId\)/);
 });
 
-test("CEO and Manager work responsibilities are visible without expanding their authority", () => {
+test("CEO and assigned Manager govern work audits without receiving HR authority", () => {
   const frontend = read("app/brainserve-app.tsx");
   const service = read("backend/src/main/java/com/brainserve/appointment/workinsight/application/WorkInsightService.java");
   const repository = read("backend/src/main/java/com/brainserve/appointment/workinsight/infrastructure/WorkTaskAuditRecordRepository.java");
@@ -40,9 +40,12 @@ test("CEO and Manager work responsibilities are visible without expanding their 
   assert.match(frontend, /Manager: \["overview", "appointments", "insights"/);
   assert.match(frontend, /role === "Manager" \? "Work oversight"/);
   assert.match(frontend, /role === "Manager" \? "Department work oversight"/);
-  assert.match(frontend, /Manager access is read-only/);
+  assert.match(frontend, /MANAGER_APPROVE/);
+  assert.match(frontend, /decideManagerWorkInsight/);
   assert.match(service, /roles\.contains\(MANAGER\)/);
   assert.match(service, /managers\.requireForUser\(actorUserId\)\.departmentId\(\)/);
+  assert.match(service, /decideByManager/);
+  assert.match(service, /managers\.requireAssignedReviewer/);
   assert.match(repository, /findTop1000ByWeekStartAndDepartmentIdOrderByHrAuditedAtDesc/);
 });
 
