@@ -52,7 +52,7 @@ test("CEO overview keeps both final visit decisions and company-wide account app
   const ceoMigration = read("backend/src/main/resources/db/migration/V41__single_company_ceo_governance.sql");
 
   assert.match(frontend, /\["CEO", "HR Admin"\]\.includes\(role\)[\s\S]*<Overview/);
-  assert.match(frontend, /<AccountProvisioningPanel[\s\S]*compact role=\{role\}/);
+  assert.match(frontend, /<AccountProvisioningPanel[\s\S]*?\bcompact\s+role=\{role\}/,);
   assert.match(frontend, /Company-wide HR and Manager approval/);
   assert.match(provisioning, /SystemRole\.ROLE_HR_ADMIN, SystemRole\.ROLE_MANAGER/);
   assert.match(ceoMigration, /uq_single_governing_ceo/);

@@ -45,7 +45,8 @@ test("the profile popover uses the BrainServe glass theme instead of a black pan
 });
 
 test("the complete role menu remains reachable in short viewports", () => {
-  assert.match(styles, /\.sidebar \{[^}]*height: 100dvh;[^}]*overflow-y: auto;/s);
+  assert.match(styles, /\.sidebar \{[^}]*height: 100vh;[^}]*overflow-y: auto;/s,);
+  assert.match(styles, /@supports \(height: 100dvh\) \{[\s\S]*?\.sidebar \{[^}]*height: 100dvh;[^}]*\}/s,);
   assert.match(styles, /\.sidebar \{[^}]*overscroll-behavior-y: contain;/s);
   assert.match(styles, /\.sidebar nav \{[^}]*flex-shrink: 0;/s);
   assert.match(styles, /\.sidebar-bottom \{[^}]*flex-shrink: 0;/s);
