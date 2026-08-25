@@ -44,6 +44,12 @@ public class DepartmentWorkTaskController {
         return service.list(userId(jwt), employeeId(jwt, false)).stream().map(TaskResponse::from).toList();
     }
 
+    @GetMapping("/workspace")
+    @PreAuthorize("hasAnyRole('HR_ADMIN','TEAM_LEAD') and hasAuthority('WORK_TASK_CREATE')")
+    DepartmentWorkTaskService.Workspace workspace(@AuthenticationPrincipal Jwt jwt) {
+        return service.workspace(userId(jwt));
+    }
+
     @PostMapping("/{id}/start")
     @PreAuthorize("hasAuthority('WORK_TASK_PROGRESS')")
     TaskResponse start(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,

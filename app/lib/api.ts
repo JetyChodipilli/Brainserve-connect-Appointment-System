@@ -307,6 +307,10 @@ export type WorkTask = { id: string; departmentId: string; employeeId: string; t
   insightReviewRequestedAt?: string | null; reworkCycle?: number;
   completedAt: string | null; approvedAt: string | null; acknowledgedAt: string | null;
   createdAt: string; version: number };
+export type WorkTaskAssignee = { employeeId: string; displayName: string;
+  designation: string; role: "EMPLOYEE" | "TEAM_LEAD" };
+export type WorkTaskWorkspace = { departmentId: string; departmentCode: string; departmentName: string;
+  eligibleAssignees: WorkTaskAssignee[] };
 export type TeamLeadPerformance = { teamLeadUserId: string; departmentId: string; totalTasks: number;
   completedTasks: number; approvedTasks: number; inProgressTasks: number; pendingReviewTasks: number;
   overdueTasks: number; completionRate: number; lastApprovedAt: string | null };
@@ -1374,6 +1378,7 @@ export const brainServeApi = {
     return apiRequest<ResourceDiscussion>(`/resource-discussions/${id}/complete`, { method: "POST" });
   },
   workTasks() { return apiRequest<WorkTask[]>("/work-tasks"); },
+  workTaskWorkspace() { return apiRequest<WorkTaskWorkspace>("/work-tasks/workspace"); },
   createWorkTask(payload: { employeeId: string; title: string; description: string; dueDate: string }) {
     return apiRequest<WorkTask>("/work-tasks", { method: "POST", body: JSON.stringify(payload) });
   },
@@ -1388,6 +1393,9 @@ export const brainServeApi = {
   teamLeadPerformance() { return apiRequest<TeamLeadPerformance[]>("/work-tasks/performance"); },
   workInsights(weekStart: string) {
     return apiRequest<WorkInsight[]>(`/work-insights?weekStart=${encodeURIComponent(weekStart)}`);
+  },
+  pendingHrWorkInsights() {
+    return apiRequest<WorkInsight[]>("/work-insights/pending-hr-audit");
   },
   auditWorkInsight(taskId: string) {
     return apiRequest<WorkInsight>(`/work-insights/tasks/${taskId}/audit`, { method: "POST" });

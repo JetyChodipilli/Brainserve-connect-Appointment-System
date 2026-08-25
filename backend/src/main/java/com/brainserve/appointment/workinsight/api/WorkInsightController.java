@@ -28,6 +28,12 @@ public class WorkInsightController {
         return service.list(actor(jwt), weekStart);
     }
 
+    @GetMapping("/pending-hr-audit")
+    @PreAuthorize("hasRole('HR_ADMIN') and hasAuthority('WORK_INSIGHT_AUDIT')")
+    List<WorkInsightService.Insight> pendingHrAudit(@AuthenticationPrincipal Jwt jwt) {
+        return service.pendingHrAudit(actor(jwt));
+    }
+
     @PostMapping("/tasks/{taskId}/audit")
     @PreAuthorize("hasRole('HR_ADMIN') and hasAuthority('WORK_INSIGHT_AUDIT')")
     WorkInsightService.Insight audit(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID taskId) {

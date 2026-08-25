@@ -36,7 +36,7 @@ const roles = read(
 const api = read("app/lib/api.ts");
 const app = read("app/brainserve-app.tsx");
 
-test("Employee, Team Lead and HR use the governed work board", () => {
+test("Employee, Team Lead, HR and Manager use the governed work board", () => {
   assert.ok(
       app.includes('"Team Lead": ["overview", "work"'),
   );
@@ -45,6 +45,9 @@ test("Employee, Team Lead and HR use the governed work board", () => {
   );
   assert.ok(
       app.includes('"HR Admin": ["overview", "appointments", "work"'),
+  );
+  assert.ok(
+      app.includes('Manager: ["overview", "appointments", "work", "insights"'),
   );
   assert.ok(
       app.includes('{ id: "work", label: "Work board"'),
@@ -160,7 +163,7 @@ test("work tasks follow the employee and Team Lead verification state machine", 
   }
 });
 
-test("backend scopes tasks to the assigned Employee and Team Lead department", () => {
+test("backend scopes tasks and assignees to the actor's department", () => {
   assert.ok(
       service.includes(
           "WORK_TASK_DEPARTMENT_MISMATCH",
@@ -180,6 +183,9 @@ test("backend scopes tasks to the assigned Employee and Team Lead department", (
       service.includes("teamLeads.requireForUser"),
   );
   assert.ok(service.includes("activeByEmployeeId"));
+  assert.ok(service.includes("managers.requireForUser(userId).departmentId()"));
+  assert.ok(service.includes("staff.activeWithAnyRoleInDepartment(Set.of(EMPLOYEE, TEAM_LEAD), departmentId, 200)"));
+  assert.ok(controller.includes('@GetMapping("/workspace")'));
   assert.ok(
       service.includes(
           "organization.requireActiveDepartment(lead.departmentId())",
@@ -280,6 +286,7 @@ test("PostgreSQL and frontend use department branches, performance and all workf
 
   for (const call of [
     "workTasks",
+    "workTaskWorkspace",
     "createWorkTask",
     "updateWorkTask",
     "acknowledgeWorkTask",
@@ -297,4 +304,6 @@ test("PostgreSQL and frontend use department branches, performance and all workf
   assert.ok(!app.includes("Category / stream"));
   assert.ok(app.includes("Employee work update"));
   assert.ok(app.includes("Team Lead decision"));
+  assert.ok(app.includes("Audit & send to Manager"));
+  assert.ok(app.includes("Open work oversight"));
 });

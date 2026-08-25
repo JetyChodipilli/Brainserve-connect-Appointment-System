@@ -37,7 +37,8 @@ test("CEO and assigned Manager govern work audits without receiving HR authority
   const service = read("backend/src/main/java/com/brainserve/appointment/workinsight/application/WorkInsightService.java");
   const repository = read("backend/src/main/java/com/brainserve/appointment/workinsight/infrastructure/WorkTaskAuditRecordRepository.java");
 
-  assert.match(frontend, /Manager: \["overview", "appointments", "insights"/);
+  assert.match(frontend, /Manager: \["overview", "appointments", "work", "insights"/);
+  assert.match(frontend, /Open work oversight/);
   assert.match(frontend, /role === "Manager" \? "Work oversight"/);
   assert.match(frontend, /role === "Manager" \? "Department work oversight"/);
   assert.match(frontend, /MANAGER_APPROVE/);

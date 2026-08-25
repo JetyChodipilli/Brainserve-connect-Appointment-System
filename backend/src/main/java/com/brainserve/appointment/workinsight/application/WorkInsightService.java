@@ -23,6 +23,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.TemporalAdjusters;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -71,12 +72,20 @@ public class WorkInsightService {
         if (roles.contains(HR)) {
             UUID departmentId = departmentHrs.requireForUser(actorUserId).departmentId();
             Map<UUID, WorkTaskAuditRecord> retained = new HashMap<>();
-            audits.findTop1000ByWeekStartOrderByHrAuditedAtDesc(weekStart)
-                    .forEach(record -> retained.put(record.getWorkTaskId(), record));
-            return tasks.recentForDepartment(departmentId).stream()
+            List<WorkTaskAuditRecord> retainedForWeek = audits
+                    .findTop1000ByWeekStartAndDepartmentIdOrderByHrAuditedAtDesc(weekStart, departmentId);
+            retainedForWeek.forEach(record -> retained.put(record.getWorkTaskId(), record));
+            List<Insight> result = new ArrayList<>(tasks.recentForDepartment(departmentId).stream()
                     .filter(task -> weekStart(task.createdAt()).equals(weekStart))
                     .map(task -> liveInsight(task, retained.get(task.id())))
-                    .toList();
+                    .toList());
+            Set<UUID> included = result.stream().map(Insight::workTaskId)
+                    .collect(java.util.stream.Collectors.toSet());
+            retainedForWeek.stream()
+                    .filter(record -> !included.contains(record.getWorkTaskId()))
+                    .map(this::retainedInsight)
+                    .forEach(result::add);
+            return List.copyOf(result);
         }
         if (roles.contains(MANAGER)) {
             UUID departmentId = managers.requireForUser(actorUserId).departmentId();
@@ -92,6 +101,23 @@ public class WorkInsightService {
         }
         throw new BusinessException("WORK_INSIGHT_ROLE_REQUIRED",
                 "Only Manager, HR, CEO and System Admin can view work insights", HttpStatus.FORBIDDEN);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Insight> pendingHrAudit(UUID hrUserId) {
+        requireRole(hrUserId, HR, "Only HR can view worksheets waiting for audit");
+        UUID departmentId = departmentHrs.requireForUser(hrUserId).departmentId();
+        Map<UUID, WorkTaskAuditRecord> retained = new HashMap<>();
+        audits.findTop1000ByDepartmentIdOrderByHrAuditedAtDesc(departmentId)
+                .forEach(record -> retained.put(record.getWorkTaskId(), record));
+        return tasks.recentForDepartment(departmentId).stream()
+                .filter(this::isReadyForHrAudit)
+                .filter(task -> {
+                    WorkTaskAuditRecord record = retained.get(task.id());
+                    return record == null || record.getAuditStatus() == WorkInsightStatus.REWORK_ASSIGNED;
+                })
+                .map(task -> liveInsight(task, retained.get(task.id())))
+                .toList();
     }
 
     @Transactional
@@ -263,10 +289,7 @@ public class WorkInsightService {
 
     private TaskSnapshot requireAuditReadyTask(UUID workTaskId) {
         TaskSnapshot task = tasks.requireTask(workTaskId);
-        boolean ready = TEAM_LEAD_ASSIGNEE.equals(task.assigneeRole())
-                ? "COMPLETED".equals(task.status())
-                : "APPROVED".equals(task.status()) || "ACKNOWLEDGED".equals(task.status());
-        if (!ready) {
+        if (!isReadyForHrAudit(task)) {
             String requiredStage = TEAM_LEAD_ASSIGNEE.equals(task.assigneeRole())
                     ? "Team Lead completion" : "Team Lead approval";
             throw new BusinessException("WORK_INSIGHT_TASK_NOT_FINAL",
@@ -274,6 +297,12 @@ public class WorkInsightService {
                     HttpStatus.CONFLICT);
         }
         return task;
+    }
+
+    private boolean isReadyForHrAudit(TaskSnapshot task) {
+        return TEAM_LEAD_ASSIGNEE.equals(task.assigneeRole())
+                ? "COMPLETED".equals(task.status())
+                : "APPROVED".equals(task.status()) || "ACKNOWLEDGED".equals(task.status());
     }
 
     private EmployeeDirectory.EmployeeSummary employee(TaskSnapshot task) {
@@ -285,7 +314,7 @@ public class WorkInsightService {
         String teamLeadName = staff.findByUserId(task.teamLeadUserId())
                 .map(StaffCommunicationDirectory.StaffMember::fullName)
                 .orElse("Former Team Lead");
-        return new WorkTaskAuditRecord(task.id(), weekStart(task.createdAt()), task.departmentId(),
+        return new WorkTaskAuditRecord(task.id(), weekStart(Instant.now()), task.departmentId(),
                 task.departmentBranch(), task.employeeId(), employee.employeeNumber(),
                 employee.displayName(), task.teamLeadUserId(), teamLeadName,
                 task.assignedByRole(), task.assigneeRole(), task.title(), task.status(), hrUserId);

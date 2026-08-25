@@ -35,7 +35,7 @@ class SystemRoleCatalogTest {
                 .doesNotContain(Permission.HR_VISIT_APPROVE, Permission.STAFF_ACCOUNT_MANAGE);
         assertThat(SystemRole.ROLE_MANAGER.permissions())
                 .contains(Permission.MANAGER_VISIT_APPROVE, Permission.EMPLOYEE_READ,
-                        Permission.WORK_INSIGHT_MANAGER_APPROVE)
+                        Permission.WORK_TASK_READ, Permission.WORK_INSIGHT_MANAGER_APPROVE)
                 .doesNotContain(Permission.CEO_VISIT_APPROVE, Permission.SALARY_READ,
                         Permission.STAFF_ACCOUNT_MANAGE, Permission.ROLE_MANAGE,
                         Permission.WORK_INSIGHT_AUDIT);

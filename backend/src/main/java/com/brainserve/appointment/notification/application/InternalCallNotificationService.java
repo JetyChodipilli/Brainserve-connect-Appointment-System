@@ -594,6 +594,7 @@ public class InternalCallNotificationService implements InternalNotificationGate
                                    StaffCommunicationDirectory.StaffMember recipient, String message,
                                    InternalCallNotification.MessagePriority priority,
                                    InternalCallNotification.MessageCategory category) {
+        if (sender.userId().equals(recipient.userId())) return;
         InternalCallNotification notification = notifications.saveAndFlush(new InternalCallNotification(
                 sender.userId(), recipient.userId(), sender.fullName(), recipient.fullName(), systemMessage(message),
                 priority, category));

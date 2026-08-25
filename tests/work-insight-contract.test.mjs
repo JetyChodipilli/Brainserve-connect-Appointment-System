@@ -57,6 +57,7 @@ test("HR, Manager or CEO rejection creates an actionable Team Lead rework cycle"
 test("HR audit, Manager verification and CEO decision endpoints are independently role locked", () => {
   assert.ok(controller.includes("WORK_INSIGHT_READ"));
   assert.ok(controller.includes("hasRole('HR_ADMIN') and hasAuthority('WORK_INSIGHT_AUDIT')"));
+  assert.ok(controller.includes('/pending-hr-audit'));
   assert.ok(controller.includes("hasRole('CEO') and hasAuthority('WORK_INSIGHT_CEO_APPROVE')"));
   assert.ok(controller.includes("hasRole('MANAGER') and hasAuthority('WORK_INSIGHT_MANAGER_APPROVE')"));
   assert.ok(service.includes("WORK_INSIGHT_TASK_NOT_FINAL"));
@@ -77,13 +78,14 @@ test("work insight notifications are emitted only after the database commit", ()
 test("HR, Manager, CEO and System Admin receive role-specific Insights tables", () => {
   assert.ok(app.includes('{ id: "insights", label: "Insights"'));
   assert.ok(app.includes('"HR Admin": ["overview", "appointments", "work", "performance", "insights"'));
-  assert.ok(app.includes('Manager: ["overview", "appointments", "insights"'));
+  assert.ok(app.includes('Manager: ["overview", "appointments", "work", "insights"'));
   assert.ok(app.includes('CEO: ["overview", "appointments", "insights"'));
   assert.ok(app.includes('"System Admin": ["overview", "insights"'));
   assert.ok(app.includes("Mark audited"));
   assert.ok(app.includes("Work audit approvals"));
   assert.ok(app.includes("Retained work insight register"));
   assert.ok(api.includes("auditWorkInsight"));
+  assert.ok(api.includes("pendingHrWorkInsights"));
   assert.ok(api.includes("decideWorkInsight"));
   assert.ok(api.includes("decideManagerWorkInsight"));
 });

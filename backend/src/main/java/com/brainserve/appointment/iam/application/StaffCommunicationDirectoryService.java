@@ -5,6 +5,8 @@ import com.brainserve.appointment.iam.domain.UserAccount;
 import com.brainserve.appointment.iam.infrastructure.UserAccountRepository;
 import com.brainserve.appointment.shared.application.BusinessException;
 import org.springframework.http.HttpStatus;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -62,6 +64,30 @@ public class StaffCommunicationDirectoryService implements StaffCommunicationDir
                         .forEach(user -> members.putIfAbsent(user.getId(), member(user))));
         return members.values().stream()
                 .sorted(java.util.Comparator.comparing(StaffMember::fullName)).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<StaffMember> activeWithAnyRoleInDepartment(Set<String> roles, UUID departmentId, int limit) {
+        if (roles == null || roles.isEmpty() || departmentId == null) return List.of();
+        int pageSize = Math.max(1, Math.min(limit, 200));
+        var pageable = PageRequest.of(0, pageSize, Sort.by(Sort.Direction.ASC, "fullName"));
+        java.util.LinkedHashMap<UUID, StaffMember> members = new java.util.LinkedHashMap<>();
+        roles.stream().map(role -> {
+            try {
+                return java.util.Optional.of(com.brainserve.appointment.iam.domain.SystemRole.valueOf(role));
+            } catch (IllegalArgumentException ignored) {
+                return java.util.Optional.<com.brainserve.appointment.iam.domain.SystemRole>empty();
+            }
+        }).flatMap(java.util.Optional::stream).forEach(role ->
+                users.findOperationalAccounts(
+                                com.brainserve.appointment.iam.domain.AccountStatus.ACTIVE,
+                                "", role, departmentId, pageable)
+                        .forEach(user -> members.putIfAbsent(user.getId(), member(user))));
+        return members.values().stream()
+                .sorted(java.util.Comparator.comparing(StaffMember::fullName))
+                .limit(pageSize)
+                .toList();
     }
 
     @Override

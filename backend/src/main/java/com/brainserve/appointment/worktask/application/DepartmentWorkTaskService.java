@@ -4,6 +4,7 @@ import com.brainserve.appointment.audit.api.AuditService;
 import com.brainserve.appointment.departmenthr.api.DepartmentHrDirectory;
 import com.brainserve.appointment.employee.api.EmployeeDirectory;
 import com.brainserve.appointment.iam.api.StaffCommunicationDirectory;
+import com.brainserve.appointment.manager.api.ManagerDirectory;
 import com.brainserve.appointment.organization.api.OrganizationDirectory;
 import com.brainserve.appointment.shared.application.BusinessException;
 import com.brainserve.appointment.teamlead.api.TeamLeadDirectory;
@@ -18,6 +19,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -27,6 +30,7 @@ public class DepartmentWorkTaskService implements WorkTaskDirectory {
     private static final String HR = "ROLE_HR_ADMIN";
     private static final String TEAM_LEAD = "ROLE_TEAM_LEAD";
     private static final String EMPLOYEE = "ROLE_EMPLOYEE";
+    private static final String MANAGER = "ROLE_MANAGER";
     private static final String HR_ASSIGNER = "HR_ADMIN";
     private static final String TEAM_LEAD_ASSIGNER = "TEAM_LEAD";
     private static final String TEAM_LEAD_ASSIGNEE = "TEAM_LEAD";
@@ -40,12 +44,13 @@ public class DepartmentWorkTaskService implements WorkTaskDirectory {
     private final ApplicationEventPublisher events;
     private final AuditService audit;
     private final DepartmentHrDirectory departmentHrs;
+    private final ManagerDirectory managers;
 
     public DepartmentWorkTaskService(DepartmentWorkTaskRepository tasks, EmployeeDirectory employees,
                                      TeamLeadDirectory teamLeads, OrganizationDirectory organization,
                                      StaffCommunicationDirectory staff,
                                      ApplicationEventPublisher events, AuditService audit,
-                                     DepartmentHrDirectory departmentHrs) {
+                                     DepartmentHrDirectory departmentHrs, ManagerDirectory managers) {
         this.tasks = tasks;
         this.employees = employees;
         this.teamLeads = teamLeads;
@@ -54,6 +59,7 @@ public class DepartmentWorkTaskService implements WorkTaskDirectory {
         this.events = events;
         this.audit = audit;
         this.departmentHrs = departmentHrs;
+        this.managers = managers;
     }
 
     @Transactional
@@ -146,11 +152,62 @@ public class DepartmentWorkTaskService implements WorkTaskDirectory {
             return tasks.findTop500ByDepartmentIdOrderByCreatedAtDesc(
                     teamLeads.requireForUser(userId).departmentId());
         }
+        if (roles.contains(MANAGER)) {
+            return tasks.findTop500ByDepartmentIdOrderByCreatedAtDesc(
+                    managers.requireForUser(userId).departmentId());
+        }
         if (roles.contains(EMPLOYEE) && employeeId != null) {
             return tasks.findTop200ByEmployeeIdOrderByCreatedAtDesc(employeeId);
         }
         throw new BusinessException("WORK_TASK_ROLE_REQUIRED",
-                "Only Employees, Team Leads and HR can view department work", HttpStatus.FORBIDDEN);
+                "Only Employees, Team Leads, HR and the assigned Manager can view department work",
+                HttpStatus.FORBIDDEN);
+    }
+
+    @Transactional(readOnly = true)
+    public Workspace workspace(UUID actorUserId) {
+        Set<String> roles = staff.requireActive(actorUserId).roles();
+        UUID departmentId;
+        UUID excludedEmployeeId = null;
+        TeamLeadDirectory.Assignment activeLead;
+        boolean hrWorkspace;
+
+        if (roles.contains(HR)) {
+            departmentId = departmentHrs.requireForUser(actorUserId).departmentId();
+            activeLead = teamLeads.activeForDepartment(departmentId).orElse(null);
+            hrWorkspace = true;
+        } else if (roles.contains(TEAM_LEAD)) {
+            activeLead = teamLeads.requireForUser(actorUserId);
+            departmentId = activeLead.departmentId();
+            excludedEmployeeId = activeLead.teamLeadEmployeeId();
+            hrWorkspace = false;
+        } else {
+            throw new BusinessException("WORK_TASK_CREATE_DENIED",
+                    "Only the assigned HR or Team Lead can load task assignees", HttpStatus.FORBIDDEN);
+        }
+
+        OrganizationDirectory.ActiveDepartment department = organization.requireActiveDepartment(departmentId);
+        List<EligibleAssignee> eligible = new ArrayList<>();
+        for (StaffCommunicationDirectory.StaffMember member
+                : staff.activeWithAnyRoleInDepartment(Set.of(EMPLOYEE, TEAM_LEAD), departmentId, 200)) {
+            if (member.employeeId() == null || member.employeeId().equals(excludedEmployeeId)) continue;
+            EmployeeDirectory.EmployeeSummary employee = employees.employeeSummary(member.employeeId());
+            if (!departmentId.equals(employee.departmentId()) || !"ACTIVE".equals(employee.status())) continue;
+
+            boolean assignedTeamLead = activeLead != null
+                    && activeLead.teamLeadUserId().equals(member.userId())
+                    && activeLead.teamLeadEmployeeId().equals(member.employeeId())
+                    && member.roles().contains(TEAM_LEAD);
+            String role;
+            if (assignedTeamLead && hrWorkspace) role = TEAM_LEAD_ASSIGNEE;
+            else if (member.roles().contains(EMPLOYEE)) role = EMPLOYEE_ASSIGNEE;
+            else continue;
+
+            eligible.add(new EligibleAssignee(employee.id(), employee.displayName(),
+                    employee.designation(), role));
+        }
+        eligible.sort(Comparator.comparing(EligibleAssignee::displayName, String.CASE_INSENSITIVE_ORDER));
+        return new Workspace(department.id(), department.code(), department.name(), List.copyOf(eligible));
     }
 
     @Override
@@ -356,6 +413,12 @@ public class DepartmentWorkTaskService implements WorkTaskDirectory {
     }
 
     public record CreateCommand(UUID employeeId, String title, String description, LocalDate dueDate) {}
+
+    public record EligibleAssignee(UUID employeeId, String displayName,
+                                   String designation, String role) {}
+
+    public record Workspace(UUID departmentId, String departmentCode, String departmentName,
+                            List<EligibleAssignee> eligibleAssignees) {}
 
     public record Performance(UUID teamLeadUserId, UUID departmentId, long totalTasks,
                               long completedTasks, long approvedTasks, long inProgressTasks,

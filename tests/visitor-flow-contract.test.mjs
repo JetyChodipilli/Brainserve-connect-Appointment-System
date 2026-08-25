@@ -55,6 +55,7 @@ test("HR forwards an employee visitor card while Team Lead retains final approva
   assert.ok(employeeNotificationListener.includes("TransactionPhase.AFTER_COMMIT"));
   assert.ok(internalNotifications.includes("activeByEmployeeId(hostEmployeeId)"));
   assert.ok(internalNotifications.includes("notifyEmployeeOfVisitorCard"));
+  assert.ok(internalNotifications.includes("sender.userId().equals(recipient.userId())"));
   assert.ok(frontend.includes("VISITOR COMING TO MEET YOU"));
   assert.ok(frontend.includes("Forwarded by HR"));
 });

@@ -52,7 +52,7 @@ import { AccountClosureCandidate, AccountClosureRequest, AccountLifecycleAccount
     InternalNotificationRecipient, isBackendConfigured, LeaveRequest, ManagedAppointment, MonthlyRecords, ProvisioningAccount,
     MyProfile, PublicDirectoryEmployee, RealtimeConnectionState, ReportExportJob, ResourceDiscussion, RetentionPolicy, RoleDefinition, RoleDepartmentChangeRequest, setAccessToken, setAuthTokens, hasAuthSession, StaffAccount,
     onAuthSessionExpired, subscribeToWorkspaceUpdates, TeamLeadAssignment, ManagerAssignment,
-    TeamLeadPerformance, WorkInsight, WorkTask,
+    TeamLeadPerformance, WorkInsight, WorkTask, WorkTaskWorkspace,
     VisitorIdentity, VisitorPass, WorkspaceSetting } from "./lib/api";
 import { allowedRecipientAuthorities, currentNotificationRecipients,
     readableNotificationRole } from "./lib/internal-notifications";
@@ -1454,7 +1454,7 @@ const navItems: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
 const rolePermissions: Record<Role, View[]> = {
     "HR Admin": ["overview", "appointments", "work", "performance", "insights", "employees", "terminations", "account-lifecycle", "visitors", "notifications", "organization", "reports", "audit", "settings", "profile"],
     CEO: ["overview", "appointments", "insights", "employees", "terminations", "account-lifecycle", "visitors", "notifications", "organization", "reports", "audit", "settings", "profile"],
-    Manager: ["overview", "appointments", "insights", "employees", "visitors", "notifications", "organization", "reports", "profile"],
+    Manager: ["overview", "appointments", "work", "insights", "employees", "visitors", "notifications", "organization", "reports", "profile"],
     "Team Lead": ["overview", "work", "employees", "notifications", "organization", "reports", "profile"],
     Employee: ["overview", "work", "employees", "notifications", "organization", "reports", "profile"],
     Reception: ["overview", "appointments", "visitors", "notifications", "reports", "profile"],
@@ -3793,7 +3793,8 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
                 {view === "work" && <WorkBoard key={`work:${workspaceRevision}`} role={role} userEmail={userEmail} employees={employees}
                                                staffAccounts={staffAccounts}
                                                departments={departments} teamLeadAssignments={teamLeadAssignments}
-                                               appointments={appointments} decideAppointment={decideAppointment} />}
+                                               appointments={appointments} decideAppointment={decideAppointment}
+                                               onNavigate={setView} />}
                 {view === "performance" && <TeamLeadPerformanceView key={`performance:${workspaceRevision}`} departments={departments}
                                                                     employees={employees} staffAccounts={staffAccounts} />}
                 {view === "insights" && <WorkInsightsView key={`insights:${workspaceRevision}`} role={role} userEmail={userEmail} departments={departments}
@@ -5270,11 +5271,12 @@ function WorkTaskPill({ status }: { status: WorkTask["status"] }) {
     return <span className={`work-task-status work-task-${status.toLowerCase().replaceAll("_", "-")}`}><i />{workTaskStatusLabel(status)}</span>;
 }
 
-function WorkBoard({ role, userEmail, employees, staffAccounts, departments, teamLeadAssignments, appointments, decideAppointment }: {
+function WorkBoard({ role, userEmail, employees, staffAccounts, departments, teamLeadAssignments, appointments, decideAppointment, onNavigate }: {
     role: Role; userEmail: string; employees: Employee[]; departments: Department[];
     staffAccounts: StaffAccount[];
     teamLeadAssignments: TeamLeadAssignment[]; appointments: Appointment[];
     decideAppointment: (id: string, decision: "approve" | "reject") => Promise<void>;
+    onNavigate: (view: View) => void;
 }) {
     const [tasks, setTasks] = useState<WorkTask[]>([]);
     const [showCreate, setShowCreate] = useState(false);
@@ -5284,7 +5286,9 @@ function WorkBoard({ role, userEmail, employees, staffAccounts, departments, tea
     const [busy, setBusy] = useState("");
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
-    const [actionDialog, setActionDialog] = useState<{ task: WorkTask; action: "start" | "complete" | "approve" | "request-changes" | "insight-rework" } | null>(null);
+    const [workspace, setWorkspace] = useState<WorkTaskWorkspace | null>(null);
+    const [pendingHrAuditTaskIds, setPendingHrAuditTaskIds] = useState<Set<string>>(new Set());
+    const [actionDialog, setActionDialog] = useState<{ task: WorkTask; action: "start" | "complete" | "approve" | "request-changes" | "insight-rework" | "hr-rework" } | null>(null);
     const [actionNote, setActionNote] = useState("");
     const demoAccounts = !isBackendConfigured ? readDemoAccounts() : [];
     const currentDemoAccount = demoAccounts.find((account) =>
@@ -5307,9 +5311,11 @@ function WorkBoard({ role, userEmail, employees, staffAccounts, departments, tea
         ? employees.find((item) => (item.uuid ?? item.id) === currentTeamLeadAssignment.teamLeadEmployeeId)
         : undefined);
     const currentEmployeeId = currentEmployee?.uuid ?? currentEmployee?.id ?? profileEmployeeId;
-    const teamLeadDepartmentId = role === "Team Lead"
-        ? currentTeamLeadAssignment?.departmentId ?? currentEmployee?.departmentId : currentEmployee?.departmentId;
-    const assignedDepartment = departments.find((department) => department.id === teamLeadDepartmentId);
+    const teamLeadDepartmentId = workspace?.departmentId ?? (role === "Team Lead"
+        ? currentTeamLeadAssignment?.departmentId ?? currentEmployee?.departmentId : currentEmployee?.departmentId);
+    const assignedDepartment = departments.find((department) => department.id === teamLeadDepartmentId)
+        ?? (workspace ? { id: workspace.departmentId, code: workspace.departmentCode,
+            name: workspace.departmentName, active: true, version: 0 } : undefined);
     const assignedTeamLead = activeTeamLeadAssignments.find((assignment) =>
         assignment.departmentId === teamLeadDepartmentId);
     const activeAccounts = isBackendConfigured ? staffAccounts : readDemoAccounts().map((account) => ({
@@ -5318,7 +5324,7 @@ function WorkBoard({ role, userEmail, employees, staffAccounts, departments, tea
         roles: [account.role], employeeId: account.employeeId ?? null,
         grantedPermissions: [], deniedPermissions: [], effectivePermissions: [],
     }));
-    const eligibleEmployees = employees.filter((item) => {
+    const previewEligibleEmployees = employees.filter((item) => {
         const employeeId = item.uuid ?? item.id;
         if (item.status !== "Active" || !teamLeadDepartmentId || item.departmentId !== teamLeadDepartmentId) return false;
         const account = activeAccounts.find((candidate) => candidate.employeeId === employeeId
@@ -5334,10 +5340,36 @@ function WorkBoard({ role, userEmail, employees, staffAccounts, departments, tea
         }
         return false;
     });
+    const eligibleAssignees = isBackendConfigured
+        ? workspace?.eligibleAssignees ?? []
+        : previewEligibleEmployees.map((item) => ({ employeeId: item.uuid ?? item.id,
+            displayName: item.name, designation: item.role,
+            role: (item.uuid ?? item.id) === assignedTeamLead?.teamLeadEmployeeId
+                ? "TEAM_LEAD" as const : "EMPLOYEE" as const }));
 
     const load = useCallback(async () => {
         try {
-            const values = isBackendConfigured ? await brainServeApi.workTasks() : readDemoWorkTasks();
+            const [values, scopedWorkspace, pendingAudits] = isBackendConfigured
+                ? await Promise.all([
+                    brainServeApi.workTasks(),
+                    (["HR Admin", "Team Lead"] as Role[]).includes(role)
+                        ? brainServeApi.workTaskWorkspace() : Promise.resolve(null),
+                    role === "HR Admin" ? brainServeApi.pendingHrWorkInsights() : Promise.resolve([]),
+                ])
+                : [readDemoWorkTasks(), null, []] as const;
+            setWorkspace(scopedWorkspace);
+            if (role === "HR Admin") {
+                if (isBackendConfigured) setPendingHrAuditTaskIds(new Set(pendingAudits.map((item) => item.workTaskId)));
+                else {
+                    const retained = new Map(readDemoWorkInsights().map((item) => [item.workTaskId, item]));
+                    setPendingHrAuditTaskIds(new Set(values.filter((task) => {
+                        const ready = task.assigneeRole === "TEAM_LEAD" ? task.status === "COMPLETED"
+                            : ["APPROVED", "ACKNOWLEDGED"].includes(task.status);
+                        const existing = retained.get(task.id);
+                        return ready && (!existing || existing.auditStatus === "REWORK_ASSIGNED");
+                    }).map((task) => task.id)));
+                }
+            }
             if (role === "Employee" && !currentEmployeeId) {
                 setTasks([]);
                 setError("Your Employee login is not linked to a saved employee profile. Ask HR to complete your department assignment.");
@@ -5493,7 +5525,54 @@ function WorkBoard({ role, userEmail, employees, staffAccounts, departments, tea
         finally { setBusy(""); }
     };
 
-    const openTaskAction = (task: WorkTask, action: "start" | "complete" | "approve" | "request-changes" | "insight-rework") => {
+    const auditHrTask = async (task: WorkTask) => {
+        setBusy(`${task.id}:hr-audit`); setError(""); setMessage("");
+        try {
+            if (isBackendConfigured) await brainServeApi.auditWorkInsight(task.id);
+            else {
+                const employee = employees.find((item) => (item.uuid ?? item.id) === task.employeeId);
+                const lead = staffAccounts.find((item) => item.userId === task.teamLeadUserId)
+                    ?? initialStaffAccounts.find((item) => item.userId === task.teamLeadUserId);
+                const now = new Date().toISOString();
+                const retained = readDemoWorkInsights().filter((item) => item.workTaskId !== task.id);
+                writeDemoWorkInsights([{ auditRecordId: newClientId(), workTaskId: task.id,
+                    weekStart: workWeekStart(), departmentId: task.departmentId,
+                    departmentName: task.departmentBranch, employeeId: task.employeeId,
+                    employeeNumber: employee?.id ?? task.employeeId, employeeName: employee?.name ?? "Assigned employee",
+                    teamLeadUserId: task.teamLeadUserId, teamLeadName: lead?.fullName ?? "Team Lead",
+                    assignedByRole: task.assignedByRole, assigneeRole: task.assigneeRole, taskTitle: task.title,
+                    taskStatus: task.status, auditStatus: "PENDING_MANAGER_APPROVAL", hrAuditedAt: now,
+                    managerDecidedAt: null, managerRemarks: null, ceoDecidedAt: null, ceoRemarks: null,
+                    reworkRequestedByRole: null, reworkReason: null, reworkRequestedAt: null,
+                    teamLeadReworkGuidance: null, teamLeadRespondedAt: null, reworkCycle: task.reworkCycle ?? 0 }, ...retained]);
+            }
+            setPendingHrAuditTaskIds((items) => { const next = new Set(items); next.delete(task.id); return next; });
+            setMessage("HR audit submitted. The assigned Manager was notified for verification before CEO approval.");
+            return true;
+        } catch (reason) { setError(reason instanceof Error ? reason.message : "The HR audit could not be submitted."); return false; }
+        finally { setBusy(""); }
+    };
+
+    const requestHrTaskRework = async (task: WorkTask, reason: string) => {
+        if (!reason.trim()) { setError("Explain the flaws before returning this worksheet."); return false; }
+        setBusy(`${task.id}:hr-rework`); setError(""); setMessage("");
+        try {
+            if (isBackendConfigured) await brainServeApi.requestWorkInsightRework(task.id, reason.trim());
+            else {
+                const now = new Date().toISOString();
+                saveDemo({ ...task, status: "INSIGHT_REWORK_REQUESTED", insightReviewSource: "HR_ADMIN",
+                    insightReviewReason: reason.trim(), insightReviewRequestedAt: now,
+                    reworkCycle: (task.reworkCycle ?? 0) + 1, version: task.version + 1 });
+            }
+            setPendingHrAuditTaskIds((items) => { const next = new Set(items); next.delete(task.id); return next; });
+            if (isBackendConfigured) await load();
+            setMessage("Worksheet returned to the Team Lead with HR rework findings.");
+            return true;
+        } catch (reason) { setError(reason instanceof Error ? reason.message : "The worksheet could not be returned."); return false; }
+        finally { setBusy(""); }
+    };
+
+    const openTaskAction = (task: WorkTask, action: "start" | "complete" | "approve" | "request-changes" | "insight-rework" | "hr-rework") => {
         setActionDialog({ task, action });
         setActionNote(action === "insight-rework" ? task.insightReviewReason ?? "" : "");
         setError(""); setMessage("");
@@ -5504,7 +5583,8 @@ function WorkBoard({ role, userEmail, employees, staffAccounts, departments, tea
         if (!actionDialog) return;
         const { task, action } = actionDialog;
         const succeeded = action === "insight-rework" ? await assignInsightRework(task, actionNote)
-            : await act(task, action, actionNote);
+            : action === "hr-rework" ? await requestHrTaskRework(task, actionNote)
+                : await act(task, action, actionNote);
         if (succeeded) { setActionDialog(null); setActionNote(""); }
     };
 
@@ -5514,6 +5594,7 @@ function WorkBoard({ role, userEmail, employees, staffAccounts, departments, tea
         approve: ["Approve employee delivery", "Record the Team Lead decision before the worksheet enters HR Insights.", "Approval note", "Optional verification or quality note", "Approve worksheet"],
         "request-changes": ["Return for employee changes", "Explain exactly what the employee must correct before resubmitting.", "Required changes", "List the flaws and acceptance criteria", "Send changes"],
         "insight-rework": ["Create an Insights rework plan", "Translate the HR, Manager or CEO feedback into clear corrective work.", "Rework guidance", "Explain the flaws, correction and expected evidence", "Assign rework"],
+        "hr-rework": ["Return worksheet for rework", "Record the flaws the Team Lead must turn into a corrective plan.", "HR audit findings", "Explain the issue, required correction and acceptance evidence", "Return to Team Lead"],
     }[actionDialog.action] : null;
 
     const branches = [...new Set(tasks.map((item) => item.departmentBranch))].sort();
@@ -5528,31 +5609,33 @@ function WorkBoard({ role, userEmail, employees, staffAccounts, departments, tea
         || role === "Team Lead" && task.assigneeRole === "TEAM_LEAD";
 
     return <section className="work-board-page">
-        <PageTitle eyebrow="DEPARTMENT TASK SHEETS" title={role === "HR Admin" ? "Department work board" : role === "Team Lead" ? "Team task sheets" : "My task sheets"}
+        <PageTitle eyebrow="DEPARTMENT TASK SHEETS" title={role === "HR Admin" ? "Department work board" : role === "Team Lead" ? "Team task sheets" : role === "Manager" ? "Department work oversight" : "My task sheets"}
                    detail={role === "HR Admin" ? "Assign work to active Employees or your department Team Lead, then audit completed delivery before Manager and CEO review."
                        : role === "Team Lead" ? "Assign work to Employees, review their delivery, and complete worksheets assigned to you by HR."
-                           : "Only task sheets assigned to your Employee profile appear here. Other employees’ work is never shown."}
-                   action={(["HR Admin", "Team Lead"] as Role[]).includes(role) && <button className="button button-primary" onClick={() => setShowCreate((value) => !value)}><FileText size={17} /> {showCreate ? "Close task form" : "Create task sheet"}</button>} />
+                           : role === "Manager" ? "Monitor task delivery in your assigned department. Verify HR-audited work in Work oversight before it reaches the CEO."
+                               : "Only task sheets assigned to your Employee profile appear here. Other employees’ work is never shown."}
+                   action={role === "Manager" ? <button className="button button-primary" onClick={() => onNavigate("insights")}><ShieldCheck size={17} /> Open work oversight</button>
+                       : (["HR Admin", "Team Lead"] as Role[]).includes(role) && <button className="button button-primary" onClick={() => setShowCreate((value) => !value)}><FileText size={17} /> {showCreate ? "Close task form" : "Create task sheet"}</button>} />
         <div className="work-notification-note glass-panel"><MessageSquare size={19} /><span><strong>Visitor updates stay in Notifications</strong><small>Appointments no longer occupy Employee or Team Lead navigation. HR visitor cards and workflow decisions are delivered through the internal message service.</small></span></div>
         {role === "Team Lead" && insightReworkQueue.length > 0 && <section className="work-rework-alert glass-panel"><span><RotateCcw size={20} /></span><div><small>INSIGHTS ACTION REQUIRED</small><strong>{insightReworkQueue.length} worksheet{insightReworkQueue.length === 1 ? "" : "s"} returned for rework</strong><p>Review the HR, Manager or CEO feedback and create a corrective plan. The assignee cannot restart until you provide guidance.</p></div><button className="button button-primary" onClick={() => { setStatusFilter("INSIGHT_REWORK_REQUESTED"); window.scrollTo({ top: 560, behavior: "smooth" }); }}>Review returned work</button></section>}
         <section className="work-metrics glass-panel">
             <div><span>{role === "Employee" ? "My task sheets" : "Department sheets"}</span><strong>{tasks.length}</strong><small>{role === "Employee" ? "Assigned only to you" : "Your department only"}</small></div><i />
             <div><span>In progress</span><strong>{metric(["IN_PROGRESS", "CHANGES_REQUESTED"])}</strong><small>Currently being worked</small></div><i />
-            <div><span>Awaiting review</span><strong>{metric(["COMPLETED"])}</strong><small>{role === "HR Admin" ? "Team Lead review or HR audit" : "Team Lead action required"}</small></div><i />
+            <div><span>Awaiting review</span><strong>{role === "HR Admin" ? pendingHrAuditTaskIds.size : metric(["COMPLETED"])}</strong><small>{role === "HR Admin" ? "HR audit action required" : role === "Manager" ? "Review progress before HR handoff" : "Team Lead action required"}</small></div><i />
             <div><span>Insights rework</span><strong>{metric(["INSIGHT_REWORK_REQUESTED"])}</strong><small>HR, Manager or CEO feedback</small></div>
         </section>
         {showCreate && <form className="work-create-form task-sheet-form panel glass-panel" onSubmit={createTask}>
             <div className="panel-heading"><div><span>NEW TASK SHEET</span><h2>Create a department worksheet</h2><p>{role === "HR Admin" ? "Select an active Employee or your department Team Lead. A Team Lead’s own delivery goes directly to HR audit and can never be self-approved." : "Select one active Employee in your department. Team Leads cannot assign a worksheet to themselves."}</p></div><FileText size={22} /></div>
-            <div className="modal-form-grid"><label>Department assignee<select name="employeeId" required defaultValue=""><option value="" disabled>Select an eligible department member</option>{eligibleEmployees.map((item) => <option key={item.uuid ?? item.id} value={item.uuid ?? item.id}>{item.name} · {(item.uuid ?? item.id) === assignedTeamLead?.teamLeadEmployeeId ? "Team Lead" : item.role}</option>)}</select></label>
+            <div className="modal-form-grid"><label>Department assignee<select name="employeeId" required defaultValue=""><option value="" disabled>Select an eligible department member</option>{eligibleAssignees.map((item) => <option key={item.employeeId} value={item.employeeId}>{item.displayName} · {item.role === "TEAM_LEAD" ? "Team Lead" : item.designation || "Employee"}</option>)}</select></label>
                 <label>Department / branch<input value={assignedDepartment ? `${assignedDepartment.name} · ${assignedDepartment.code}` : "No department assigned"} readOnly aria-readonly="true" /></label>
                 <label>Task<input name="title" minLength={3} maxLength={160} required placeholder="What should the employee complete?" /></label>
                 <label>Due date<input name="dueDate" type="date" min={officeToday()} defaultValue={nextBusinessDays(3)[0]} required /></label>
                 <label className="full-field">Worksheet instructions<textarea name="description" minLength={5} maxLength={1000} required placeholder="Describe the work, expected result and acceptance criteria" /></label></div>
-            <div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setShowCreate(false)}>Cancel</button><button className="button button-primary" disabled={busy === "create" || eligibleEmployees.length === 0 || !assignedDepartment}><Send size={16} />{busy === "create" ? "Creating…" : "Create sheet & notify"}</button></div>
+            <div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setShowCreate(false)}>Cancel</button><button className="button button-primary" disabled={busy === "create" || eligibleAssignees.length === 0 || !assignedDepartment}><Send size={16} />{busy === "create" ? "Creating…" : "Create sheet & notify"}</button></div>
             {!assignedDepartment && <div className="login-error" role="alert">Your account has no active department assignment. Complete the role-to-department assignment before creating work.</div>}
-            {assignedDepartment && eligibleEmployees.length === 0 && <div className="login-error" role="alert">No eligible active Employee or Team Lead login is available in {assignedDepartment.name}.</div>}
+            {assignedDepartment && eligibleAssignees.length === 0 && <div className="login-error" role="alert">No eligible active Employee or Team Lead login is available in {assignedDepartment.name}.</div>}
         </form>}
-        <div className="work-toolbar glass-panel"><div><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search my task sheets" /></div><select value={branchFilter} onChange={(event) => setBranchFilter(event.target.value)}><option value="ALL">All departments</option>{branches.map((item) => <option key={item}>{item}</option>)}</select><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="ALL">All statuses</option>{(["ASSIGNED", "IN_PROGRESS", "COMPLETED", "CHANGES_REQUESTED", "INSIGHT_REWORK_REQUESTED", "APPROVED", "ACKNOWLEDGED"] as WorkTask["status"][]).map((item) => <option key={item} value={item}>{workTaskStatusLabel(item)}</option>)}</select></div>
+        <div className="work-toolbar glass-panel"><div><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={role === "Employee" ? "Search my task sheets" : "Search department task sheets"} /></div><select value={branchFilter} onChange={(event) => setBranchFilter(event.target.value)}><option value="ALL">All departments</option>{branches.map((item) => <option key={item}>{item}</option>)}</select><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="ALL">All statuses</option>{(["ASSIGNED", "IN_PROGRESS", "COMPLETED", "CHANGES_REQUESTED", "INSIGHT_REWORK_REQUESTED", "APPROVED", "ACKNOWLEDGED"] as WorkTask["status"][]).map((item) => <option key={item} value={item}>{workTaskStatusLabel(item)}</option>)}</select></div>
         <div className="task-sheet-grid">
             {filtered.map((task) => <article className="task-sheet-card glass-panel" key={task.id}>
                 <header><div><span className="task-sheet-label"><FileText size={14} /> TASK SHEET</span><small>#{task.id.slice(-8).toUpperCase()}</small></div><WorkTaskPill status={task.status} /></header>
@@ -5567,11 +5650,12 @@ function WorkBoard({ role, userEmail, employees, staffAccounts, departments, tea
                     {role === "Team Lead" && task.assigneeRole === "EMPLOYEE" && task.status === "COMPLETED" && <><button className="button button-reject" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "request-changes")}><X size={14} /> Request changes</button><button className="button button-approve" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "approve")}><BadgeCheck size={14} /> Approve delivery</button></>}
                     {role === "Team Lead" && task.status === "INSIGHT_REWORK_REQUESTED" && <button className="button button-primary" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "insight-rework")}><RotateCcw size={14} /> Create rework plan</button>}
                     {role === "Employee" && task.status === "APPROVED" && <button className="button button-approve" disabled={Boolean(busy)} onClick={() => void act(task, "acknowledge")}><BadgeCheck size={14} /> Acknowledge</button>}
+                    {role === "HR Admin" && pendingHrAuditTaskIds.has(task.id) && <><button className="button button-reject" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "hr-rework")}><RotateCcw size={14} /> Return for rework</button><button className="button button-approve" disabled={Boolean(busy)} onClick={() => void auditHrTask(task)}><ShieldCheck size={14} /> Audit & send to Manager</button></>}
                 </footer>
-            </article>)}{filtered.length === 0 && <div className="empty-state task-sheet-empty"><FileText size={29} /><strong>{role === "Employee" ? "No task sheet is assigned to you" : "No department task sheets yet"}</strong><small>{role === "Employee" ? "When HR or your Team Lead creates a sheet for your Employee ID, it will appear here automatically." : "Create a task sheet and select one eligible department member."}</small></div>}
+            </article>)}{filtered.length === 0 && <div className="empty-state task-sheet-empty"><FileText size={29} /><strong>{role === "Employee" ? "No task sheet is assigned to you" : "No department task sheets yet"}</strong><small>{role === "Employee" ? "When HR or your Team Lead creates a sheet for your Employee ID, it will appear here automatically." : role === "Manager" ? "Task sheets created by HR or the Team Lead in your assigned department will appear here." : "Create a task sheet and select one eligible department member."}</small></div>}
         </div>
         {role === "Team Lead" && <article className="panel glass-panel work-visitor-approvals"><div className="panel-heading"><div><span>VISITOR WORKFLOW</span><h2>Department visitor approvals</h2><p>Visitor approval remains available here so removing Appointments never breaks Security → Reception → HR routing.</p></div><b>{pendingVisitorApprovals.length}</b></div>{pendingVisitorApprovals.map((item) => <div className="approval-item" key={item.id}><div className="approval-person"><span className="avatar">{item.initials}</span><span><strong>{item.visitor}</strong><small>Visiting {item.host} · {item.referenceNumber}</small></span></div><p>“{item.arrivalPurpose ?? item.purpose}”</p><div className="approval-actions"><button className="button button-reject" onClick={() => void decideAppointment(item.id, "reject")}><X size={15} /> Reject visit</button><button className="button button-approve" onClick={() => void decideAppointment(item.id, "approve")}><Check size={15} /> Approve visit</button></div></div>)}{pendingVisitorApprovals.length === 0 && <div className="empty-state"><ShieldCheck size={27} /><strong>No visitor approvals waiting</strong><small>HR-routed department visitors will appear here.</small></div>}</article>}
-        {actionDialog && taskActionCopy && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setActionDialog(null); }}><section className="modal work-action-modal" role="dialog" aria-modal="true" aria-labelledby="work-action-title"><header><div><span>WORKSHEET ACTION</span><h2 id="work-action-title">{taskActionCopy[0]}</h2><p>{taskActionCopy[1]}</p></div><button className="icon-button" type="button" onClick={() => setActionDialog(null)} aria-label="Close worksheet action"><X size={18} /></button></header><form onSubmit={submitTaskAction}><div className="work-action-context"><span className="avatar">{visitorInitials(employeeName(actionDialog.task.employeeId))}</span><span><small>{actionDialog.task.departmentBranch} · {workTaskStatusLabel(actionDialog.task.status)}</small><strong>{actionDialog.task.title}</strong></span></div>{actionDialog.action === "insight-rework" && <div className="modal-review-source"><RotateCcw size={16} /><span><small>{actionDialog.task.insightReviewSource === "CEO" ? "CEO FEEDBACK" : actionDialog.task.insightReviewSource === "MANAGER" ? "MANAGER FEEDBACK" : "HR FEEDBACK"}</small><strong>{actionDialog.task.insightReviewReason}</strong></span></div>}<label>{taskActionCopy[2]}<textarea value={actionNote} onChange={(event) => setActionNote(event.target.value)} placeholder={taskActionCopy[3]} minLength={["complete", "request-changes", "insight-rework"].includes(actionDialog.action) ? 5 : undefined} maxLength={1000} required={["complete", "request-changes", "insight-rework"].includes(actionDialog.action)} autoFocus /></label><small className="dialog-character-count">{actionNote.length}/1000</small>{error && <div className="login-error" role="alert">{error}</div>}<div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setActionDialog(null)}>Cancel</button><button className="button button-primary" disabled={Boolean(busy)}>{busy ? "Saving…" : taskActionCopy[4]}<ArrowRight size={15} /></button></div></form></section></div>}
+        {actionDialog && taskActionCopy && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setActionDialog(null); }}><section className="modal work-action-modal" role="dialog" aria-modal="true" aria-labelledby="work-action-title"><header><div><span>WORKSHEET ACTION</span><h2 id="work-action-title">{taskActionCopy[0]}</h2><p>{taskActionCopy[1]}</p></div><button className="icon-button" type="button" onClick={() => setActionDialog(null)} aria-label="Close worksheet action"><X size={18} /></button></header><form onSubmit={submitTaskAction}><div className="work-action-context"><span className="avatar">{visitorInitials(employeeName(actionDialog.task.employeeId))}</span><span><small>{actionDialog.task.departmentBranch} · {workTaskStatusLabel(actionDialog.task.status)}</small><strong>{actionDialog.task.title}</strong></span></div>{actionDialog.action === "insight-rework" && <div className="modal-review-source"><RotateCcw size={16} /><span><small>{actionDialog.task.insightReviewSource === "CEO" ? "CEO FEEDBACK" : actionDialog.task.insightReviewSource === "MANAGER" ? "MANAGER FEEDBACK" : "HR FEEDBACK"}</small><strong>{actionDialog.task.insightReviewReason}</strong></span></div>}<label>{taskActionCopy[2]}<textarea value={actionNote} onChange={(event) => setActionNote(event.target.value)} placeholder={taskActionCopy[3]} minLength={["complete", "request-changes", "insight-rework", "hr-rework"].includes(actionDialog.action) ? 5 : undefined} maxLength={1000} required={["complete", "request-changes", "insight-rework", "hr-rework"].includes(actionDialog.action)} autoFocus /></label><small className="dialog-character-count">{actionNote.length}/1000</small>{error && <div className="login-error" role="alert">{error}</div>}<div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setActionDialog(null)}>Cancel</button><button className="button button-primary" disabled={Boolean(busy)}>{busy ? "Saving…" : taskActionCopy[4]}<ArrowRight size={15} /></button></div></form></section></div>}
         {message && <div className="success-banner"><CheckCircle2 size={17} />{message}</div>}{error && !actionDialog && <div className="login-error" role="alert">{error}</div>}
     </section>;
 }
@@ -9227,7 +9311,7 @@ const fallbackSettings: WorkspaceSetting[] = [
 const fallbackRoles: RoleDefinition[] = [
     { role: "ROLE_SYSTEM_ADMIN", defaultPermissions: ["ROLE_MANAGE", "SYSTEM_CONFIGURE", "AUDIT_VIEW"] },
     { role: "ROLE_CEO", defaultPermissions: ["CEO_VISIT_APPROVE", "COMPANY_PROFILE_MANAGE", "APPOINTMENT_POLICY_MANAGE", "INTERNAL_NOTIFICATION_READ", "INTERNAL_NOTIFICATION_SEND", "AUDIT_VIEW"] },
-    { role: "ROLE_MANAGER", defaultPermissions: ["MANAGER_VISIT_APPROVE", "EMPLOYEE_READ", "REPORT_VIEW", "INTERNAL_NOTIFICATION_READ", "INTERNAL_NOTIFICATION_SEND"] },
+    { role: "ROLE_MANAGER", defaultPermissions: ["MANAGER_VISIT_APPROVE", "EMPLOYEE_READ", "WORK_TASK_READ", "WORK_INSIGHT_READ", "WORK_INSIGHT_MANAGER_APPROVE", "REPORT_VIEW", "INTERNAL_NOTIFICATION_READ", "INTERNAL_NOTIFICATION_SEND"] },
     { role: "ROLE_HR_ADMIN", defaultPermissions: ["STAFF_ACCOUNT_APPROVE", "STAFF_ACCOUNT_MANAGE", "HR_VISIT_APPROVE", "EMPLOYEE_CREATE", "WORK_TASK_READ", "WORK_TASK_PERFORMANCE_READ", "APPOINTMENT_POLICY_MANAGE", "INTERNAL_NOTIFICATION_READ", "INTERNAL_NOTIFICATION_SEND"] },
     { role: "ROLE_TEAM_LEAD", defaultPermissions: ["TEAM_LEAD_DIRECTORY_VIEW", "TEAM_LEAD_VISIT_APPROVE", "WORK_TASK_READ", "WORK_TASK_CREATE", "WORK_TASK_PROGRESS", "WORK_TASK_REVIEW", "INTERNAL_NOTIFICATION_READ", "INTERNAL_NOTIFICATION_SEND"] },
     { role: "ROLE_EMPLOYEE", defaultPermissions: ["EMPLOYEE_READ", "WORK_TASK_READ", "WORK_TASK_PROGRESS", "INTERNAL_NOTIFICATION_READ", "INTERNAL_NOTIFICATION_SEND"] },
