@@ -30,11 +30,15 @@ const branchMigration = read(
 const governanceMigration = read(
     "backend/src/main/resources/db/migration/V47__work_task_manager_governance.sql",
 );
+const repository = read(
+    "backend/src/main/java/com/brainserve/appointment/worktask/infrastructure/DepartmentWorkTaskRepository.java",
+);
 const roles = read(
     "backend/src/main/java/com/brainserve/appointment/iam/domain/SystemRole.java",
 );
 const api = read("app/lib/api.ts");
 const app = read("app/brainserve-app.tsx");
+const styles = read("app/globals.css");
 
 test("Employee, Team Lead, HR and Manager use the governed work board", () => {
   assert.ok(
@@ -85,6 +89,39 @@ test("task sheets never fall back to another employee's assignments", () => {
   assert.ok(
       app.includes('className="task-sheet-grid"'),
   );
+});
+
+test("task sheets use a compact readable summary with progressive disclosure", () => {
+  assert.ok(app.includes('className="task-sheet-summary"'));
+  assert.ok(app.includes('className="task-sheet-brief"'));
+  assert.ok(app.includes("WORK TO COMPLETE"));
+  assert.ok(app.includes('aria-labelledby={`work-task-${task.id}-title`}'));
+  assert.ok(app.includes("expandedTaskId"));
+  assert.ok(app.includes("aria-expanded={expanded}"));
+  assert.ok(app.includes("View details"));
+  assert.ok(styles.includes(".task-sheet-brief p"));
+  assert.ok(styles.includes("-webkit-line-clamp: 2"));
+  assert.ok(styles.includes("repeat(auto-fit, minmax(min(100%, 390px), 1fr))"));
+  assert.ok(styles.includes("white-space: pre-wrap"));
+  assert.ok(styles.includes("align-items: start"));
+});
+
+test("the work board defaults to today while preserving open carry-forward work", () => {
+  assert.ok(app.includes('useState<"TODAY" | "CARRY_FORWARD">("TODAY")'));
+  assert.ok(app.includes("officeDateFromInstant(task.createdAt) === today"));
+  assert.ok(app.includes("isOpenCarryForwardTask"));
+  assert.ok(app.includes("Open carry-forward"));
+  assert.ok(app.includes("Closed older worksheets stay stored for governance and audit"));
+  assert.ok(app.includes('queueScope === "TODAY" ? todayTasks : carryForwardTasks'));
+});
+
+test("older worksheets remain persisted instead of being deleted from history", () => {
+  assert.ok(domain.includes("@Entity"));
+  assert.ok(migration.includes("CREATE TABLE department_work_task"));
+  assert.ok(migration.includes("created_at"));
+  assert.ok(repository.includes("findTop200ByEmployeeIdOrderByCreatedAtDesc"));
+  assert.ok(repository.includes("findTop500ByDepartmentIdOrderByCreatedAtDesc"));
+  assert.ok(governanceMigration.includes("work_task_audit_record"));
 });
 
 test("demo organization and Team Lead scope persist across login sessions", () => {
