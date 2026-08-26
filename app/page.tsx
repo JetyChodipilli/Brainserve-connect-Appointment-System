@@ -1,4 +1,5 @@
 import BrainServeApp from "./brainserve-app";
+import AppErrorBoundary from "./app-error-boundary";
 import { Database, LockKeyhole, ShieldAlert } from "lucide-react";
 
 export default function Home() {
@@ -63,5 +64,9 @@ export default function Home() {
     );
   }
 
-  return <BrainServeApp browserPreviewEnabled={browserPreviewEnabled} />;
+  return (
+      <AppErrorBoundary>
+        <BrainServeApp browserPreviewEnabled={browserPreviewEnabled} />
+      </AppErrorBoundary>
+  );
 }

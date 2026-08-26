@@ -11,11 +11,13 @@ import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionOperations;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
 @Service
 public class NotificationDispatcher {
@@ -23,29 +25,53 @@ public class NotificationDispatcher {
     private final JavaMailSender mail;
     private final ObjectMapper mapper;
     private final String from;
+    private final TransactionOperations transactions;
     public NotificationDispatcher(OutboxRepository outbox, JavaMailSender mail, ObjectMapper mapper,
-                                  @Value("${brainserve.notification.from}") String from) {
+                                  @Value("${brainserve.notification.from}") String from,
+                                  TransactionOperations transactions) {
         this.outbox = outbox; this.mail = mail; this.mapper = mapper; this.from = from;
+        this.transactions = transactions;
     }
 
     @Scheduled(fixedDelayString = "${brainserve.notification.poll-ms}")
-    @Transactional
     public void dispatch() {
-        List<OutboxMessage> messages = outbox.lockReady(OutboxMessage.Status.PENDING, Instant.now(), PageRequest.of(0, 25));
-        for (OutboxMessage message : messages) {
-            message.markProcessing();
+        List<ClaimedEmail> messages = claimReady();
+        for (ClaimedEmail message : messages) {
+            String failure = null;
             try {
-                Map<String, String> payload = mapper.readValue(message.getPayloadJson(), new TypeReference<>() {});
+                Map<String, String> payload = mapper.readValue(message.payloadJson(), new TypeReference<>() {});
                 SimpleMailMessage email = new SimpleMailMessage();
-                email.setFrom(from); email.setTo(message.getDestination());
-                applyTemplate(email, message.getTemplate(), payload);
+                email.setFrom(from); email.setTo(message.destination());
+                applyTemplate(email, message.template(), payload);
                 mail.send(email);
-                message.markSent();
             } catch (MailException | com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException ex) {
-                message.retry(ex.getClass().getSimpleName());
+                failure = ex.getClass().getSimpleName();
             }
+            complete(message.id(), failure);
         }
     }
+
+    private List<ClaimedEmail> claimReady() {
+        List<ClaimedEmail> claimed = transactions.execute(status -> {
+            List<OutboxMessage> ready = outbox.lockReady(
+                    Set.of(OutboxMessage.Status.PENDING, OutboxMessage.Status.PROCESSING),
+                    Instant.now(), PageRequest.of(0, 25));
+            ready.forEach(OutboxMessage::markProcessing);
+            outbox.flush();
+            return ready.stream().map(message -> new ClaimedEmail(message.getId(), message.getDestination(),
+                    message.getTemplate(), message.getPayloadJson())).toList();
+        });
+        return claimed == null ? List.of() : claimed;
+    }
+
+    private void complete(UUID messageId, String failure) {
+        transactions.executeWithoutResult(status -> outbox.findById(messageId).ifPresent(message -> {
+            if (failure == null) message.markSent();
+            else message.retry(failure);
+        }));
+    }
+
+    private record ClaimedEmail(UUID id, String destination, String template, String payloadJson) {}
 
     private void applyTemplate(SimpleMailMessage email, String template, Map<String, String> payload) {
         String reference = payload.getOrDefault("reference", "your request");

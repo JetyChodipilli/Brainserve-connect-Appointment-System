@@ -101,9 +101,32 @@ test("task sheets use a compact readable summary with progressive disclosure", (
   assert.ok(app.includes("View details"));
   assert.ok(styles.includes(".task-sheet-brief p"));
   assert.ok(styles.includes("-webkit-line-clamp: 2"));
+  assert.ok(styles.includes(".task-sheet-summary h2 { min-height: 46px"));
   assert.ok(styles.includes("repeat(auto-fit, minmax(min(100%, 390px), 1fr))"));
   assert.ok(styles.includes("white-space: pre-wrap"));
   assert.ok(styles.includes("align-items: start"));
+  assert.ok(app.includes('className="task-sheet-summary-alert-slot"'));
+  assert.ok(styles.includes(".task-sheet-summary-alert-slot { min-height: 27px"));
+  assert.ok(app.includes("{expanded && <>"));
+});
+
+test("work board refreshes are isolated, non-overlapping and preserve the last good data", () => {
+  assert.ok(app.includes("loadInFlightRef.current"));
+  assert.ok(app.includes("hasLoadedTasksRef.current"));
+  assert.ok(app.includes("await Promise.allSettled(["));
+  assert.ok(app.includes("The last loaded worksheets remain visible"));
+  assert.ok(app.includes('document.visibilityState === "visible"'));
+  assert.ok(app.includes('void load("manual")'));
+});
+
+test("HR and Manager retain a visible department scope even on an empty daily board", () => {
+  assert.ok(app.includes("workBoardDepartments.length === 1 ? workBoardDepartments[0].id"));
+  assert.ok(app.includes("brainServeApi.visibleDepartments()"));
+  assert.ok(app.includes("setScopeDepartments(scopeResult.value)"));
+  assert.ok(app.includes('className="work-scope-summary"'));
+  assert.ok(app.includes("DEPARTMENT SCOPE"));
+  assert.ok(app.includes("assignedDepartment?.name, ...tasks.map"));
+  assert.ok(app.includes('aria-label="Department scope"'));
 });
 
 test("the work board defaults to today while preserving open carry-forward work", () => {
@@ -231,7 +254,7 @@ test("backend scopes tasks and assignees to the actor's department", () => {
   assert.ok(service.includes("department.name()"));
   assert.ok(
       app.includes(
-          "item.departmentId === teamLeadDepartmentId",
+          "item.departmentId === scopeDepartmentIdRef.current",
       ),
   );
   assert.ok(

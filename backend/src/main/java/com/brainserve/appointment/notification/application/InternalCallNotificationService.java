@@ -17,6 +17,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionOperations;
 
 import java.util.LinkedHashSet;
 import java.util.Comparator;
@@ -49,6 +50,7 @@ public class InternalCallNotificationService implements InternalNotificationGate
     private final EmployeeDirectory employees;
     private final EssentialLogService essentialLogs;
     private final long deliveryRetrySeconds;
+    private final TransactionOperations transactions;
 
     public InternalCallNotificationService(InternalCallNotificationRepository notifications,
                                            StaffCommunicationDirectory staff,
@@ -60,7 +62,8 @@ public class InternalCallNotificationService implements InternalNotificationGate
                                            EssentialLogService essentialLogs,
                                            @Value("${brainserve.appointment.office-zone:Asia/Kolkata}") String officeZone,
                                            @Value("${brainserve.notification.internal-call-retry-seconds:30}")
-                                           long deliveryRetrySeconds) {
+                                           long deliveryRetrySeconds,
+                                           TransactionOperations transactions) {
         this.notifications = notifications; this.staff = staff; this.kafka = kafka; this.topic = topic;
         this.departmentHrs = departmentHrs;
         this.managers = managers;
@@ -68,6 +71,7 @@ public class InternalCallNotificationService implements InternalNotificationGate
         this.essentialLogs = essentialLogs;
         this.officeZone = ZoneId.of(officeZone);
         this.deliveryRetrySeconds = Math.max(5, deliveryRetrySeconds);
+        this.transactions = transactions;
     }
 
     @Transactional(readOnly = true)
@@ -529,13 +533,8 @@ public class InternalCallNotificationService implements InternalNotificationGate
     }
 
     @Scheduled(fixedDelayString = "${brainserve.notification.internal-call-dispatch-ms:1000}")
-    @Transactional
     public void dispatchPending() {
-        notifications.lockReadyForDelivery(Set.of(
-                                InternalCallNotification.DeliveryStatus.FAILED,
-                                InternalCallNotification.DeliveryStatus.QUEUED),
-                        Instant.now(), PageRequest.of(0, 25))
-                .forEach(this::publishLocked);
+        claimReadyForDelivery().forEach(this::publishClaimed);
     }
 
     static Set<String> allowedRecipientRoles(Set<String> senderRoles) {
@@ -609,21 +608,44 @@ public class InternalCallNotificationService implements InternalNotificationGate
         return normalized.length() <= 500 ? normalized : normalized.substring(0, 497) + "...";
     }
 
-    private void publishLocked(InternalCallNotification notification) {
-        Instant retryAt = Instant.now().plusSeconds(deliveryRetrySeconds);
-        notification.beginDeliveryAttempt(retryAt);
-        notifications.saveAndFlush(notification);
-        try {
-            kafka.send(topic, notification.getRecipientUserId().toString(), new InternalCallEvent(notification.getId(),
+    private List<ClaimedInternalCall> claimReadyForDelivery() {
+        List<ClaimedInternalCall> claimed = transactions.execute(status -> {
+            Instant retryAt = Instant.now().plusSeconds(deliveryRetrySeconds);
+            List<InternalCallNotification> ready = notifications.lockReadyForDelivery(Set.of(
+                            InternalCallNotification.DeliveryStatus.FAILED,
+                            InternalCallNotification.DeliveryStatus.QUEUED),
+                    Instant.now(), PageRequest.of(0, 25));
+            ready.forEach(notification -> notification.beginDeliveryAttempt(retryAt));
+            notifications.flush();
+            return ready.stream().map(notification -> new ClaimedInternalCall(notification.getId(),
                     notification.getSenderUserId(), notification.getRecipientUserId(), notification.getMessage(),
-                    notification.getSentAt())).get(5, TimeUnit.SECONDS);
-            notification.markPublished(Instant.now(), retryAt);
-            return;
+                    notification.getSentAt(), retryAt)).toList();
+        });
+        return claimed == null ? List.of() : claimed;
+    }
+
+    private void publishClaimed(ClaimedInternalCall notification) {
+        String failure = null;
+        try {
+            kafka.send(topic, notification.recipientUserId().toString(), new InternalCallEvent(notification.id(),
+                    notification.senderUserId(), notification.recipientUserId(), notification.message(),
+                    notification.sentAt())).get(5, TimeUnit.SECONDS);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
-            notification.markFailed("Kafka publish interrupted", retryAt);
+            failure = "Kafka publish interrupted";
         } catch (Exception exception) {
-            notification.markFailed(exception.getClass().getSimpleName(), retryAt);
+            failure = exception.getClass().getSimpleName();
         }
+        String deliveryFailure = failure;
+        transactions.executeWithoutResult(status -> notifications.findById(notification.id()).ifPresent(current -> {
+            // The Kafka consumer can acknowledge between publish and this completion transaction.
+            // Never move an already delivered message back to QUEUED.
+            if (current.getDeliveryStatus() == InternalCallNotification.DeliveryStatus.DELIVERED) return;
+            if (deliveryFailure == null) current.markPublished(Instant.now(), notification.retryAt());
+            else current.markFailed(deliveryFailure, notification.retryAt());
+        }));
     }
+
+    private record ClaimedInternalCall(UUID id, UUID senderUserId, UUID recipientUserId, String message,
+                                       Instant sentAt, Instant retryAt) {}
 }

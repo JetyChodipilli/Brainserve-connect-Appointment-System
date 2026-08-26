@@ -3,6 +3,7 @@ package com.brainserve.appointment.notification.application;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import java.util.concurrent.Executor;
 
@@ -19,5 +20,17 @@ public class NotificationAsyncConfiguration {
         executor.setAwaitTerminationSeconds(20);
         executor.initialize();
         return executor;
+    }
+
+    @Bean(name = "taskScheduler")
+    ThreadPoolTaskScheduler taskScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setThreadNamePrefix("brainserve-scheduled-");
+        scheduler.setPoolSize(4);
+        scheduler.setRemoveOnCancelPolicy(true);
+        scheduler.setWaitForTasksToCompleteOnShutdown(true);
+        scheduler.setAwaitTerminationSeconds(20);
+        scheduler.initialize();
+        return scheduler;
     }
 }

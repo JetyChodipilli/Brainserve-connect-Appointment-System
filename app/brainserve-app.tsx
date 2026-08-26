@@ -2679,6 +2679,7 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
         const queueSafeRefresh = () => {
             if (refreshTimer) window.clearTimeout(refreshTimer);
             const applyWhenIdle = () => {
+                if (document.visibilityState !== "visible") return;
                 const active = document.activeElement;
                 const editing = active instanceof HTMLElement
                     && (["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName)
@@ -2698,8 +2699,13 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
             },
             setLiveState,
         );
+        const refreshWhenVisible = () => {
+            if (document.visibilityState === "visible") queueSafeRefresh();
+        };
+        document.addEventListener("visibilitychange", refreshWhenVisible);
         return () => {
             unsubscribe();
+            document.removeEventListener("visibilitychange", refreshWhenVisible);
             if (refreshTimer) window.clearTimeout(refreshTimer);
         };
     }, [role, userEmail]);
@@ -2946,7 +2952,10 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
     useEffect(() => {
         if (!isBackendConfigured || role === "System Admin") return;
         let active = true;
+        let requestInFlight = false;
         const refreshAppointments = async () => {
+            if (requestInFlight || document.visibilityState !== "visible") return;
+            requestInFlight = true;
             try {
                 const appointmentPage = await brainServeApi.appointments();
                 if (!active) return;
@@ -2990,6 +2999,7 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
                     };
                 }));
             } catch { /* The initial loader displays actionable API errors. */ }
+            finally { requestInFlight = false; }
         };
         const timer = window.setInterval(() => void refreshAppointments(), 60000);
         return () => { active = false; window.clearInterval(timer); };
@@ -2998,7 +3008,10 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
     useEffect(() => {
         if (!rolePermissions[role].includes("notifications")) return;
         let active = true;
+        let requestInFlight = false;
         const refresh = async () => {
+            if (requestInFlight || document.visibilityState !== "visible") return;
+            requestInFlight = true;
             try {
                 const unread = isBackendConfigured
                     ? (await brainServeApi.internalNotificationUnreadCount()).unreadCount
@@ -3010,6 +3023,7 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
                     if (previousUnread !== null && unread > previousUnread) void playNotificationSound("message");
                 }
             } catch { /* The inbox itself presents recoverable service errors. */ }
+            finally { requestInFlight = false; }
         };
         void refresh();
         const timer = window.setInterval(() => void refresh(), 15000);
@@ -5288,10 +5302,17 @@ function WorkBoard({ role, userEmail, employees, staffAccounts, departments, tea
     const [busy, setBusy] = useState("");
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
+    const [loadError, setLoadError] = useState("");
+    const [refreshWarning, setRefreshWarning] = useState("");
+    const [loading, setLoading] = useState(true);
     const [workspace, setWorkspace] = useState<WorkTaskWorkspace | null>(null);
+    const [scopeDepartments, setScopeDepartments] = useState<Department[]>(departments);
     const [pendingHrAuditTaskIds, setPendingHrAuditTaskIds] = useState<Set<string>>(new Set());
     const [actionDialog, setActionDialog] = useState<{ task: WorkTask; action: "start" | "complete" | "approve" | "request-changes" | "insight-rework" | "hr-rework" } | null>(null);
     const [actionNote, setActionNote] = useState("");
+    const loadInFlightRef = useRef(false);
+    const hasLoadedTasksRef = useRef(false);
+    const workBoardDepartments = departments.length > 0 ? departments : scopeDepartments;
     const demoAccounts = !isBackendConfigured ? readDemoAccounts() : [];
     const currentDemoAccount = demoAccounts.find((account) =>
         account.email.toLowerCase() === userEmail.toLowerCase());
@@ -5314,8 +5335,11 @@ function WorkBoard({ role, userEmail, employees, staffAccounts, departments, tea
         : undefined);
     const currentEmployeeId = currentEmployee?.uuid ?? currentEmployee?.id ?? profileEmployeeId;
     const teamLeadDepartmentId = workspace?.departmentId ?? (role === "Team Lead"
-        ? currentTeamLeadAssignment?.departmentId ?? currentEmployee?.departmentId : currentEmployee?.departmentId);
-    const assignedDepartment = departments.find((department) => department.id === teamLeadDepartmentId)
+            ? currentTeamLeadAssignment?.departmentId ?? currentEmployee?.departmentId : currentEmployee?.departmentId)
+        ?? (workBoardDepartments.length === 1 ? workBoardDepartments[0].id : undefined);
+    const scopeDepartmentIdRef = useRef(teamLeadDepartmentId);
+    useEffect(() => { scopeDepartmentIdRef.current = teamLeadDepartmentId; }, [teamLeadDepartmentId]);
+    const assignedDepartment = workBoardDepartments.find((department) => department.id === teamLeadDepartmentId)
         ?? (workspace ? { id: workspace.departmentId, code: workspace.departmentCode,
             name: workspace.departmentName, active: true, version: 0 } : undefined);
     const assignedTeamLead = activeTeamLeadAssignments.find((assignment) =>
@@ -5349,20 +5373,22 @@ function WorkBoard({ role, userEmail, employees, staffAccounts, departments, tea
             role: (item.uuid ?? item.id) === assignedTeamLead?.teamLeadEmployeeId
                 ? "TEAM_LEAD" as const : "EMPLOYEE" as const }));
 
-    const load = useCallback(async () => {
+    const load = useCallback(async (intent: "initial" | "background" | "manual" = "background") => {
+        if (loadInFlightRef.current) return;
+        loadInFlightRef.current = true;
+        if (!hasLoadedTasksRef.current || intent === "manual") setLoading(true);
         try {
-            const [values, scopedWorkspace, pendingAudits] = isBackendConfigured
-                ? await Promise.all([
-                    brainServeApi.workTasks(),
-                    (["HR Admin", "Team Lead"] as Role[]).includes(role)
-                        ? brainServeApi.workTaskWorkspace() : Promise.resolve(null),
-                    role === "HR Admin" ? brainServeApi.pendingHrWorkInsights() : Promise.resolve([]),
-                ])
-                : [readDemoWorkTasks(), null, []] as const;
-            setWorkspace(scopedWorkspace);
-            if (role === "HR Admin") {
-                if (isBackendConfigured) setPendingHrAuditTaskIds(new Set(pendingAudits.map((item) => item.workTaskId)));
-                else {
+            if (role === "Employee" && !currentEmployeeId) {
+                setTasks([]);
+                setLoadError("Your Employee login is not linked to a saved employee profile. Ask HR to complete your department assignment.");
+                hasLoadedTasksRef.current = true;
+                return;
+            }
+
+            let values: WorkTask[];
+            if (!isBackendConfigured) {
+                values = readDemoWorkTasks();
+                if (role === "HR Admin") {
                     const retained = new Map(readDemoWorkInsights().map((item) => [item.workTaskId, item]));
                     setPendingHrAuditTaskIds(new Set(values.filter((task) => {
                         const ready = task.assigneeRole === "TEAM_LEAD" ? task.status === "COMPLETED"
@@ -5371,26 +5397,95 @@ function WorkBoard({ role, userEmail, employees, staffAccounts, departments, tea
                         return ready && (!existing || existing.auditStatus === "REWORK_ASSIGNED");
                     }).map((task) => task.id)));
                 }
+                setWorkspace(null);
+                setRefreshWarning("");
+            } else {
+                const [taskResult, workspaceResult, auditResult, scopeResult] = await Promise.allSettled([
+                    brainServeApi.workTasks(),
+                    (["HR Admin", "Team Lead"] as Role[]).includes(role)
+                        ? brainServeApi.workTaskWorkspace() : Promise.resolve(null),
+                    role === "HR Admin" ? brainServeApi.pendingHrWorkInsights() : Promise.resolve([]),
+                    (["Manager", "Employee"] as Role[]).includes(role)
+                        ? brainServeApi.visibleDepartments() : Promise.resolve([] as Department[]),
+                ] as const);
+                const warnings: string[] = [];
+
+                if (workspaceResult.status === "fulfilled") {
+                    setWorkspace(workspaceResult.value);
+                    if (workspaceResult.value) {
+                        setScopeDepartments([{ id: workspaceResult.value.departmentId,
+                            code: workspaceResult.value.departmentCode, name: workspaceResult.value.departmentName,
+                            active: true, version: 0 }]);
+                    }
+                }
+                else if ((["HR Admin", "Team Lead"] as Role[]).includes(role)) {
+                    warnings.push("The assignee list could not be refreshed.");
+                }
+
+                if (scopeResult.status === "fulfilled") {
+                    if (scopeResult.value.length > 0) setScopeDepartments(scopeResult.value);
+                } else if ((["Manager", "Employee"] as Role[]).includes(role)) {
+                    warnings.push("The department scope could not be refreshed.");
+                }
+
+                if (role === "HR Admin") {
+                    if (auditResult.status === "fulfilled") {
+                        setPendingHrAuditTaskIds(new Set(auditResult.value.map((item) => item.workTaskId)));
+                    } else warnings.push("The HR audit queue could not be refreshed.");
+                }
+
+                if (taskResult.status === "rejected") {
+                    const detail = taskResult.reason instanceof Error
+                        ? taskResult.reason.message : "The worksheet service is temporarily unavailable.";
+                    const recoverableDetail = detail.includes("did not respond within 20 seconds")
+                        ? "The backend is taking longer than expected."
+                        : detail;
+                    if (hasLoadedTasksRef.current) {
+                        setRefreshWarning(`Live refresh was interrupted. The last loaded worksheets remain visible. ${recoverableDetail}`);
+                    } else {
+                        setLoadError(`Worksheets could not be loaded. ${recoverableDetail}`);
+                    }
+                    return;
+                }
+                values = taskResult.value;
+                setRefreshWarning(warnings.join(" "));
             }
-            if (role === "Employee" && !currentEmployeeId) {
-                setTasks([]);
-                setError("Your Employee login is not linked to a saved employee profile. Ask HR to complete your department assignment.");
-                return;
-            }
+
             const scoped = role === "Employee"
                 ? values.filter((item) => item.employeeId === currentEmployeeId)
                 : (role === "Team Lead" || role === "HR Admin") && !isBackendConfigured
-                    ? values.filter((item) => Boolean(teamLeadDepartmentId)
-                        && item.departmentId === teamLeadDepartmentId)
+                    ? values.filter((item) => Boolean(scopeDepartmentIdRef.current)
+                        && item.departmentId === scopeDepartmentIdRef.current)
                     : values;
-            setTasks(scoped); setError("");
-        } catch (reason) { setError(reason instanceof Error ? reason.message : "Department work could not be loaded."); }
-    }, [currentEmployeeId, role, teamLeadDepartmentId]);
+            setTasks(scoped);
+            hasLoadedTasksRef.current = true;
+            setLoadError("");
+        } catch (reason) {
+            const detail = reason instanceof Error
+                ? reason.message : "The worksheet service is temporarily unavailable.";
+            if (hasLoadedTasksRef.current) {
+                setRefreshWarning(`Live refresh was interrupted. The last loaded worksheets remain visible. ${detail}`);
+            } else {
+                setLoadError(`Worksheets could not be loaded. ${detail}`);
+            }
+        } finally {
+            loadInFlightRef.current = false;
+            setLoading(false);
+        }
+    }, [currentEmployeeId, role, scopeDepartmentIdRef]);
 
     useEffect(() => {
-        const initial = window.setTimeout(() => void load(), 0);
-        const timer = window.setInterval(() => void load(), 15000);
-        return () => { window.clearTimeout(initial); window.clearInterval(timer); };
+        const refreshWhenVisible = () => {
+            if (document.visibilityState === "visible") void load("background");
+        };
+        const initial = window.setTimeout(() => void load("initial"), 0);
+        const timer = window.setInterval(refreshWhenVisible, 30000);
+        document.addEventListener("visibilitychange", refreshWhenVisible);
+        return () => {
+            window.clearTimeout(initial);
+            window.clearInterval(timer);
+            document.removeEventListener("visibilitychange", refreshWhenVisible);
+        };
     }, [load]);
 
     const saveDemo = (updated: WorkTask) => {
@@ -5611,7 +5706,8 @@ function WorkBoard({ role, userEmail, employees, staffAccounts, departments, tea
     const todayTasks = tasks.filter(isTodayTask);
     const carryForwardTasks = tasks.filter(isOpenCarryForwardTask);
     const queueTasks = queueScope === "TODAY" ? todayTasks : carryForwardTasks;
-    const branches = [...new Set(queueTasks.map((item) => item.departmentBranch))].sort();
+    const branches = [...new Set([assignedDepartment?.name, ...tasks.map((item) => item.departmentBranch)]
+        .filter((item): item is string => Boolean(item)))].sort();
     const filtered = queueTasks.filter((item) => (statusFilter === "ALL" || item.status === statusFilter)
         && (branchFilter === "ALL" || item.departmentBranch === branchFilter)
         && `${item.title} ${item.description} ${item.departmentBranch}`.toLowerCase().includes(query.toLowerCase()));
@@ -5655,10 +5751,13 @@ function WorkBoard({ role, userEmail, employees, staffAccounts, departments, tea
                 <button type="button" className={queueScope === "TODAY" ? "active" : ""} aria-pressed={queueScope === "TODAY"} onClick={() => { setQueueScope("TODAY"); setBranchFilter("ALL"); setStatusFilter("ALL"); setExpandedTaskId(null); }}><CalendarDays size={17} /><span><strong>Today</strong><small>Current worksheets</small></span><b>{todayTasks.length}</b></button>
                 <button type="button" className={queueScope === "CARRY_FORWARD" ? "active" : ""} aria-pressed={queueScope === "CARRY_FORWARD"} onClick={() => { setQueueScope("CARRY_FORWARD"); setBranchFilter("ALL"); setStatusFilter("ALL"); setExpandedTaskId(null); }}><FileClock size={17} /><span><strong>Open carry-forward</strong><small>Older work requiring action</small></span><b>{carryForwardTasks.length}</b></button>
             </div>
+            <div className="work-scope-summary"><Building2 size={17} aria-hidden="true" /><span><small>DEPARTMENT SCOPE</small><strong>{assignedDepartment ? `${assignedDepartment.name} · ${assignedDepartment.code}` : "Department assignment unavailable"}</strong></span></div>
             <p>Closed older worksheets stay stored for governance and audit, but no longer crowd the daily work board.</p>
         </section>
-        <div className="work-toolbar glass-panel"><div><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={queueScope === "TODAY" ? "Search today’s worksheets" : "Search open carry-forward"} /></div><select value={branchFilter} onChange={(event) => setBranchFilter(event.target.value)}><option value="ALL">All departments</option>{branches.map((item) => <option key={item}>{item}</option>)}</select><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="ALL">All statuses</option>{(["ASSIGNED", "IN_PROGRESS", "COMPLETED", "CHANGES_REQUESTED", "INSIGHT_REWORK_REQUESTED", "APPROVED", "ACKNOWLEDGED"] as WorkTask["status"][]).map((item) => <option key={item} value={item}>{workTaskStatusLabel(item)}</option>)}</select></div>
+        <div className="work-toolbar glass-panel"><div><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={queueScope === "TODAY" ? "Search today’s worksheets" : "Search open carry-forward"} /></div><select aria-label="Department scope" value={branchFilter} onChange={(event) => setBranchFilter(event.target.value)} disabled={branches.length <= 1}><option value="ALL">{assignedDepartment ? assignedDepartment.name : "Assigned department"}</option>{branches.length > 1 && branches.map((item) => <option key={item}>{item}</option>)}</select><select aria-label="Worksheet status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="ALL">All statuses</option>{(["ASSIGNED", "IN_PROGRESS", "COMPLETED", "CHANGES_REQUESTED", "INSIGHT_REWORK_REQUESTED", "APPROVED", "ACKNOWLEDGED"] as WorkTask["status"][]).map((item) => <option key={item} value={item}>{workTaskStatusLabel(item)}</option>)}</select></div>
+        {(loadError || refreshWarning) && <div className={`work-refresh-state ${loadError ? "is-error" : "is-warning"}`} role={loadError ? "alert" : "status"}><RotateCcw size={17} aria-hidden="true" /><span><strong>{loadError ? "Work Board could not refresh" : "Showing the last successful update"}</strong><small>{loadError || refreshWarning}</small></span><button type="button" className="button button-secondary" disabled={loading} onClick={() => void load("manual")}>{loading ? "Retrying…" : "Retry now"}</button></div>}
         <div className="task-sheet-grid">
+            {loading && tasks.length === 0 && <div className="empty-state task-sheet-empty work-loading-state" role="status" aria-live="polite"><RotateCcw size={29} /><strong>Loading your department worksheets</strong><small>Existing records will stay visible during future background refreshes.</small></div>}
             {filtered.map((task) => {
                 const expanded = expandedTaskId === task.id;
                 const detailsId = `work-task-${task.id}-details`;
@@ -5675,7 +5774,7 @@ function WorkBoard({ role, userEmail, employees, staffAccounts, departments, tea
                             <span><CircleUserRound size={15} aria-hidden="true" /><small>Assigned to</small><strong>{role === "Employee" ? "You" : employeeName(task.employeeId)}</strong></span>
                             <span><CalendarDays size={15} aria-hidden="true" /><small>Due</small><strong>{new Date(`${task.dueDate}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</strong></span>
                         </div>
-                        {task.insightReviewReason && <span className="task-sheet-rework-flag"><RotateCcw size={14} /> Rework feedback · cycle {task.reworkCycle ?? 1}</span>}
+                        <div className="task-sheet-summary-alert-slot">{task.insightReviewReason && <span className="task-sheet-rework-flag"><RotateCcw size={14} /> Rework feedback · cycle {task.reworkCycle ?? 1}</span>}</div>
                     </div>
                     <section className="task-sheet-details" id={detailsId} aria-label="Worksheet details" hidden={!expanded}>
                         <section className="task-sheet-brief" aria-label="Full work instructions"><span>FULL INSTRUCTIONS</span><p>{task.description}</p></section>
@@ -5685,16 +5784,18 @@ function WorkBoard({ role, userEmail, employees, staffAccounts, departments, tea
                         {(task.employeeUpdate || task.teamLeadReview) && <div className="task-sheet-responses">{task.employeeUpdate && <div><span>{task.assigneeRole === "TEAM_LEAD" ? "Team Lead work update" : "Employee work update"}</span><p>{task.employeeUpdate}</p></div>}{task.teamLeadReview && <div><span>Team Lead decision</span><p>{task.teamLeadReview}</p></div>}</div>}
                     </section>
                     <footer className="work-task-actions">
-                        {canProgress(task) && ["ASSIGNED", "CHANGES_REQUESTED"].includes(task.status) && <button className="button button-secondary" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "start")}><Clock3 size={14} /> Start</button>}
-                        {canProgress(task) && ["ASSIGNED", "IN_PROGRESS", "CHANGES_REQUESTED"].includes(task.status) && <button className="button button-primary" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "complete")}><CheckCircle2 size={14} /> Complete</button>}
-                        {role === "Team Lead" && task.assigneeRole === "EMPLOYEE" && task.status === "COMPLETED" && <><button className="button button-reject" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "request-changes")}><X size={14} /> Request changes</button><button className="button button-approve" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "approve")}><BadgeCheck size={14} /> Approve delivery</button></>}
-                        {role === "Team Lead" && task.status === "INSIGHT_REWORK_REQUESTED" && <button className="button button-primary" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "insight-rework")}><RotateCcw size={14} /> Create rework plan</button>}
-                        {role === "Employee" && task.status === "APPROVED" && <button className="button button-approve" disabled={Boolean(busy)} onClick={() => void act(task, "acknowledge")}><BadgeCheck size={14} /> Acknowledge</button>}
-                        {role === "HR Admin" && pendingHrAuditTaskIds.has(task.id) && <><button className="button button-reject" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "hr-rework")}><RotateCcw size={14} /> Return for rework</button><button className="button button-approve" disabled={Boolean(busy)} onClick={() => void auditHrTask(task)}><ShieldCheck size={14} /> Audit & send to Manager</button></>}
+                        {expanded && <>
+                            {canProgress(task) && ["ASSIGNED", "CHANGES_REQUESTED"].includes(task.status) && <button className="button button-secondary" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "start")}><Clock3 size={14} /> Start</button>}
+                            {canProgress(task) && ["ASSIGNED", "IN_PROGRESS", "CHANGES_REQUESTED"].includes(task.status) && <button className="button button-primary" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "complete")}><CheckCircle2 size={14} /> Complete</button>}
+                            {role === "Team Lead" && task.assigneeRole === "EMPLOYEE" && task.status === "COMPLETED" && <><button className="button button-reject" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "request-changes")}><X size={14} /> Request changes</button><button className="button button-approve" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "approve")}><BadgeCheck size={14} /> Approve delivery</button></>}
+                            {role === "Team Lead" && task.status === "INSIGHT_REWORK_REQUESTED" && <button className="button button-primary" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "insight-rework")}><RotateCcw size={14} /> Create rework plan</button>}
+                            {role === "Employee" && task.status === "APPROVED" && <button className="button button-approve" disabled={Boolean(busy)} onClick={() => void act(task, "acknowledge")}><BadgeCheck size={14} /> Acknowledge</button>}
+                            {role === "HR Admin" && pendingHrAuditTaskIds.has(task.id) && <><button className="button button-reject" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "hr-rework")}><RotateCcw size={14} /> Return for rework</button><button className="button button-approve" disabled={Boolean(busy)} onClick={() => void auditHrTask(task)}><ShieldCheck size={14} /> Audit & send to Manager</button></>}
+                        </>}
                         <button type="button" className="button task-sheet-details-toggle" aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpandedTaskId(expanded ? null : task.id)}>{expanded ? "Hide details" : "View details"}<ChevronRight size={15} aria-hidden="true" /></button>
                     </footer>
                 </article>;
-            })}{filtered.length === 0 && <div className="empty-state task-sheet-empty"><FileText size={29} /><strong>{queueScope === "TODAY" ? "No worksheets on today’s board" : "No open carry-forward work"}</strong><small>{queueScope === "TODAY" ? "New worksheets created today will appear here. Use Open carry-forward for unfinished work from earlier days." : "All older worksheets are closed or no longer require action. Their stored records remain available for governance and audit."}</small></div>}
+            })}{!loading && filtered.length === 0 && <div className="empty-state task-sheet-empty"><FileText size={29} /><strong>{queueScope === "TODAY" ? "No worksheets on today’s board" : "No open carry-forward work"}</strong><small>{loadError ? "Retry the department workspace connection before treating this as an empty board." : queueScope === "TODAY" ? "New worksheets created today will appear here. Use Open carry-forward for unfinished work from earlier days." : "All older worksheets are closed or no longer require action. Their stored records remain available for governance and audit."}</small></div>}
         </div>
         {role === "Team Lead" && <article className="panel glass-panel work-visitor-approvals"><div className="panel-heading"><div><span>VISITOR WORKFLOW</span><h2>Department visitor approvals</h2><p>Visitor approval remains available here so removing Appointments never breaks Security → Reception → HR routing.</p></div><b>{pendingVisitorApprovals.length}</b></div>{pendingVisitorApprovals.map((item) => <div className="approval-item" key={item.id}><div className="approval-person"><span className="avatar">{item.initials}</span><span><strong>{item.visitor}</strong><small>Visiting {item.host} · {item.referenceNumber}</small></span></div><p>“{item.arrivalPurpose ?? item.purpose}”</p><div className="approval-actions"><button className="button button-reject" onClick={() => void decideAppointment(item.id, "reject")}><X size={15} /> Reject visit</button><button className="button button-approve" onClick={() => void decideAppointment(item.id, "approve")}><Check size={15} /> Approve visit</button></div></div>)}{pendingVisitorApprovals.length === 0 && <div className="empty-state"><ShieldCheck size={27} /><strong>No visitor approvals waiting</strong><small>HR-routed department visitors will appear here.</small></div>}</article>}
         {actionDialog && taskActionCopy && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setActionDialog(null); }}><section className="modal work-action-modal" role="dialog" aria-modal="true" aria-labelledby="work-action-title"><header><div><span>WORKSHEET ACTION</span><h2 id="work-action-title">{taskActionCopy[0]}</h2><p>{taskActionCopy[1]}</p></div><button className="icon-button" type="button" onClick={() => setActionDialog(null)} aria-label="Close worksheet action"><X size={18} /></button></header><form onSubmit={submitTaskAction}><div className="work-action-context"><span className="avatar">{visitorInitials(employeeName(actionDialog.task.employeeId))}</span><span><small>{actionDialog.task.departmentBranch} · {workTaskStatusLabel(actionDialog.task.status)}</small><strong>{actionDialog.task.title}</strong></span></div>{actionDialog.action === "insight-rework" && <div className="modal-review-source"><RotateCcw size={16} /><span><small>{actionDialog.task.insightReviewSource === "CEO" ? "CEO FEEDBACK" : actionDialog.task.insightReviewSource === "MANAGER" ? "MANAGER FEEDBACK" : "HR FEEDBACK"}</small><strong>{actionDialog.task.insightReviewReason}</strong></span></div>}<label>{taskActionCopy[2]}<textarea value={actionNote} onChange={(event) => setActionNote(event.target.value)} placeholder={taskActionCopy[3]} minLength={["complete", "request-changes", "insight-rework", "hr-rework"].includes(actionDialog.action) ? 5 : undefined} maxLength={1000} required={["complete", "request-changes", "insight-rework", "hr-rework"].includes(actionDialog.action)} autoFocus /></label><small className="dialog-character-count">{actionNote.length}/1000</small>{error && <div className="login-error" role="alert">{error}</div>}<div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setActionDialog(null)}>Cancel</button><button className="button button-primary" disabled={Boolean(busy)}>{busy ? "Saving…" : taskActionCopy[4]}<ArrowRight size={15} /></button></div></form></section></div>}
@@ -8951,35 +9052,92 @@ function InternalNotificationsView({ role, userEmail, onUnreadChange }: {
     const [busy, setBusy] = useState(false);
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
+    const [loadError, setLoadError] = useState("");
+    const [refreshWarning, setRefreshWarning] = useState("");
+    const notificationLoadInFlightRef = useRef(false);
+    const notificationsLoadedRef = useRef(false);
 
-    const loadData = useCallback(async () => {
+    const loadData = useCallback(async (includeArchive = false) => {
+        if (notificationLoadInFlightRef.current) return;
+        notificationLoadInFlightRef.current = true;
         try {
-            const [nextRecipients, nextInbox, nextSent, nextArchive] = isBackendConfigured
-                ? await Promise.all([brainServeApi.internalNotificationRecipients(), brainServeApi.internalNotificationInbox(),
-                    brainServeApi.internalNotificationSent(), brainServeApi.internalNotificationArchive()])
-                : (() => {
-                    const all = readDemoInternalNotifications();
-                    const today = officeToday();
-                    const isToday = (item: InternalNotification) => officeToday(new Date(item.sentAt)) === today;
-                    return [demoInternalRecipients(role, userEmail), all.filter((item) => item.recipientEmail === userEmail && isToday(item)),
-                        all.filter((item) => item.senderEmail === userEmail && isToday(item)),
-                        all.filter((item) => (item.senderEmail === userEmail || item.recipientEmail === userEmail) && !isToday(item))] as const;
-                })();
-            setRecipients(nextRecipients); setInbox(nextInbox); setSent(nextSent); setArchive(nextArchive);
-            setArchivePage(0); setArchiveHasMore(isBackendConfigured && nextArchive.length === 50);
-            setRecipientId((current) => nextRecipients.some((item) => item.userId === current)
-                ? current : nextRecipients[0]?.userId ?? "");
-            onUnreadChange(nextInbox.filter((item) => !item.readAt).length);
-            setError("");
+            if (!isBackendConfigured) {
+                const all = readDemoInternalNotifications();
+                const today = officeToday();
+                const isToday = (item: InternalNotification) => officeToday(new Date(item.sentAt)) === today;
+                const nextRecipients = demoInternalRecipients(role, userEmail);
+                const nextInbox = all.filter((item) => item.recipientEmail === userEmail && isToday(item));
+                const nextSent = all.filter((item) => item.senderEmail === userEmail && isToday(item));
+                const nextArchive = all.filter((item) => (item.senderEmail === userEmail || item.recipientEmail === userEmail) && !isToday(item));
+                setRecipients(nextRecipients); setInbox(nextInbox); setSent(nextSent); setArchive(nextArchive);
+                setArchivePage(0); setArchiveHasMore(false);
+                setRecipientId((current) => nextRecipients.some((item) => item.userId === current)
+                    ? current : nextRecipients[0]?.userId ?? "");
+                onUnreadChange(nextInbox.filter((item) => !item.readAt).length);
+                notificationsLoadedRef.current = true;
+                setLoadError(""); setRefreshWarning("");
+                return;
+            }
+
+            const [recipientResult, inboxResult, sentResult, archiveResult] = await Promise.allSettled([
+                brainServeApi.internalNotificationRecipients(),
+                brainServeApi.internalNotificationInbox(),
+                brainServeApi.internalNotificationSent(),
+                includeArchive ? brainServeApi.internalNotificationArchive() : Promise.resolve(null),
+            ] as const);
+            const failures: string[] = [];
+            let successfulSections = 0;
+
+            if (recipientResult.status === "fulfilled") {
+                const nextRecipients = recipientResult.value;
+                setRecipients(nextRecipients);
+                setRecipientId((current) => nextRecipients.some((item) => item.userId === current)
+                    ? current : nextRecipients[0]?.userId ?? "");
+                successfulSections += 1;
+            } else failures.push("recipients");
+
+            if (inboxResult.status === "fulfilled") {
+                setInbox(inboxResult.value);
+                onUnreadChange(inboxResult.value.filter((item) => !item.readAt).length);
+                successfulSections += 1;
+            } else failures.push("inbox");
+
+            if (sentResult.status === "fulfilled") {
+                setSent(sentResult.value);
+                successfulSections += 1;
+            } else failures.push("sent messages");
+
+            if (archiveResult.status === "fulfilled" && archiveResult.value !== null) {
+                setArchive(archiveResult.value);
+                setArchivePage(0); setArchiveHasMore(archiveResult.value.length === 50);
+                successfulSections += 1;
+            } else if (includeArchive && archiveResult.status === "rejected") failures.push("archive");
+
+            if (successfulSections > 0) {
+                notificationsLoadedRef.current = true;
+                setLoadError("");
+                setRefreshWarning(failures.length
+                    ? `Some sections could not refresh (${failures.join(", ")}). Other message data remains available.` : "");
+            } else {
+                const fallback = "Notifications could not be refreshed. Check the backend connection and retry.";
+                if (notificationsLoadedRef.current) setRefreshWarning(`${fallback} The last successful message data remains visible.`);
+                else setLoadError(fallback);
+            }
         } catch (reason) {
-            setError(reason instanceof ApiError ? reason.message : "Internal notifications could not be loaded.");
+            const detail = reason instanceof Error ? reason.message : "Notifications could not be refreshed.";
+            if (notificationsLoadedRef.current) setRefreshWarning(`${detail} The last successful message data remains visible.`);
+            else setLoadError(detail);
+        } finally {
+            notificationLoadInFlightRef.current = false;
         }
     }, [onUnreadChange, role, userEmail]);
 
     useEffect(() => {
-        const initialLoad = window.setTimeout(() => void loadData(), 0);
-        const timer = window.setInterval(() => void loadData(), 10000);
-        const refresh = () => void loadData();
+        const initialLoad = window.setTimeout(() => void loadData(true), 0);
+        const refresh = () => {
+            if (document.visibilityState === "visible") void loadData(false);
+        };
+        const timer = window.setInterval(refresh, 30000);
         const refreshFromStorage = (event: StorageEvent) => {
             if (!event.key || [DEMO_ACCOUNTS_KEY, DEMO_INTERNAL_NOTIFICATIONS_KEY].includes(event.key)) refresh();
         };
@@ -9148,6 +9306,7 @@ function InternalNotificationsView({ role, userEmail, onUnreadChange }: {
     return <section className="internal-notifications-page">
         <PageTitle eyebrow="BRAINSERVE INTERNAL DELIVERY" title="Priority calls & conversations"
                    detail="Today’s urgent and unread requests rise to the top. Earlier messages are stored safely in Archive." />
+        {(loadError || refreshWarning) && <div className={`work-refresh-state ${loadError ? "is-error" : "is-warning"}`} role={loadError ? "alert" : "status"}><RotateCcw size={17} aria-hidden="true" /><span><strong>{loadError ? "Message service could not refresh" : "Some message data is temporarily stale"}</strong><small>{loadError || refreshWarning}</small></span><button type="button" className="button button-secondary" onClick={() => void loadData(tab === "archive")}>Retry now</button></div>}
         <div className="notification-attention glass-panel"><div><strong>{inbox.filter((item) => !item.readAt).length}</strong><span>Unread</span><small>Needs acknowledgement</small></div><i /><div><strong>{inbox.filter((item) => item.priority === "URGENT" && !item.readAt).length}</strong><span>Urgent</span><small>Handle first</small></div><i /><div><strong>{conversations.length}</strong><span>Conversations</span><small>Grouped by person</small></div></div>
         <div className="notification-workspace">
             <article className="panel glass-panel notification-composer" id="internal-message-composer">
@@ -9167,8 +9326,8 @@ function InternalNotificationsView({ role, userEmail, onUnreadChange }: {
             </article>
 
             <article className="panel glass-panel notification-inbox-panel">
-                <div className="notification-day-banner"><CalendarDays size={16} /><span><strong>Today · {formatOfficeDate(new Date().toISOString())}</strong><small>Only today’s messages appear in the operational inbox.</small></span><button type="button" className="archive-shortcut" onClick={() => setTab("archive")}><Archive size={14} />Old messages{archive.length > 0 && <b>{archive.length}{archiveHasMore ? "+" : ""}</b>}</button></div>
-                <div className="notification-tabs"><button className={tab === "priority" ? "active" : ""} onClick={() => setTab("priority")}><Bell size={16} />Priority inbox{inbox.filter((item) => !item.readAt).length > 0 && <b>{inbox.filter((item) => !item.readAt).length}</b>}</button><button className={tab === "conversations" ? "active" : ""} onClick={() => setTab("conversations")}><MessageSquare size={16} />Today’s conversations</button><button className={tab === "sent" ? "active" : ""} onClick={() => setTab("sent")}><Send size={16} />Sent today</button><button className={tab === "archive" ? "active" : ""} onClick={() => setTab("archive")}><Archive size={16} />Archive</button></div>
+                <div className="notification-day-banner"><CalendarDays size={16} /><span><strong>Today · {formatOfficeDate(new Date().toISOString())}</strong><small>Only today’s messages appear in the operational inbox.</small></span><button type="button" className="archive-shortcut" onClick={() => { setTab("archive"); void loadData(true); }}><Archive size={14} />Old messages{archive.length > 0 && <b>{archive.length}{archiveHasMore ? "+" : ""}</b>}</button></div>
+                <div className="notification-tabs"><button className={tab === "priority" ? "active" : ""} onClick={() => setTab("priority")}><Bell size={16} />Priority inbox{inbox.filter((item) => !item.readAt).length > 0 && <b>{inbox.filter((item) => !item.readAt).length}</b>}</button><button className={tab === "conversations" ? "active" : ""} onClick={() => setTab("conversations")}><MessageSquare size={16} />Today’s conversations</button><button className={tab === "sent" ? "active" : ""} onClick={() => setTab("sent")}><Send size={16} />Sent today</button><button className={tab === "archive" ? "active" : ""} onClick={() => { setTab("archive"); void loadData(true); }}><Archive size={16} />Archive</button></div>
                 <div className="notification-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search people or message text" />{tab === "priority" && <select value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)}><option value="ALL">All priorities</option><option value="UNREAD">Unread only</option><option value="URGENT">Urgent</option><option value="HIGH">High</option></select>}{tab === "archive" && <select value={archiveSort} onChange={(event) => setArchiveSort(event.target.value as typeof archiveSort)}><option value="NEWEST">Newest first</option><option value="OLDEST">Oldest first</option><option value="PRIORITY">Priority first</option></select>}</div>
                 {tab === "priority" && <div className="internal-message-list">{priorityInbox.map((item) => renderMessage(item, true))}{priorityInbox.length === 0 && <div className="empty-state"><CheckCircle2 size={28} /><strong>Your priority queue is clear</strong><small>Try another filter or wait for a new internal delivery.</small></div>}</div>}
                 {tab === "sent" && <div className="internal-message-list">{sentVisible.map((item) => renderMessage(item, false))}{sentVisible.length === 0 && <div className="empty-state"><Send size={28} /><strong>No sent calls found</strong><small>New internal calls remain searchable here.</small></div>}</div>}

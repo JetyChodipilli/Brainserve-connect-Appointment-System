@@ -11,6 +11,9 @@ import com.brainserve.appointment.manager.api.ManagerDirectory;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionOperations;
 
 import java.time.Instant;
 import java.util.List;
@@ -38,9 +41,15 @@ class InternalCallNotificationServiceTest {
     private final ManagerDirectory managers = mock(ManagerDirectory.class);
     private final EmployeeDirectory employees = mock(EmployeeDirectory.class);
     private final EssentialLogService essentialLogs = mock(EssentialLogService.class);
+    private final TransactionOperations transactions = new TransactionOperations() {
+        @Override
+        public <T> T execute(TransactionCallback<T> action) {
+            return action.doInTransaction(mock(TransactionStatus.class));
+        }
+    };
     private final InternalCallNotificationService service = new InternalCallNotificationService(
             notifications, staff, kafka, "brainserve.internal-calls.v1", departmentHrs, managers, employees, essentialLogs,
-            "Asia/Kolkata", 30);
+            "Asia/Kolkata", 30, transactions);
 
     @Test
     void exposesOnlyRecipientsAllowedByTheSenderRole() {
@@ -257,6 +266,7 @@ class InternalCallNotificationServiceTest {
                         InternalCallNotification.DeliveryStatus.QUEUED)),
                 any(Instant.class), any(org.springframework.data.domain.Pageable.class)))
                 .thenReturn(List.of(persisted));
+        when(notifications.findById(notificationId)).thenReturn(Optional.of(persisted));
         var sent = new CompletableFuture<org.springframework.kafka.support.SendResult<String, InternalCallEvent>>();
         sent.complete(null);
         when(kafka.send(eq("brainserve.internal-calls.v1"), eq(recipientId.toString()),

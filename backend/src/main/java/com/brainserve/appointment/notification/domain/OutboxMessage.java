@@ -48,7 +48,13 @@ public class OutboxMessage extends AuditableEntity {
     public String getTemplate() { return template; }
     public String getPayloadJson() { return payloadJson; }
     public int getAttemptCount() { return attemptCount; }
-    public void markProcessing() { status = Status.PROCESSING; attemptCount++; }
+    public void markProcessing() {
+        status = Status.PROCESSING;
+        attemptCount++;
+        // A crashed dispatcher must not strand this row in PROCESSING forever.
+        // The ready query may reclaim it after this short delivery lease expires.
+        nextAttemptAt = Instant.now().plusSeconds(300);
+    }
     public void markSent() { status = Status.SENT; sentAt = Instant.now(); lastErrorCode = null; }
     public void retry(String errorCode) {
         lastErrorCode = errorCode;
