@@ -209,7 +209,7 @@ public interface UserAccountRepository extends JpaRepository<UserAccount, UUID> 
 
     @Query(
             value = """
-                    select distinct account
+                    select account
                       from UserAccount account
                       join account.roles role
                      where account.archived = false
