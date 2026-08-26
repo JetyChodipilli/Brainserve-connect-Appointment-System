@@ -2592,11 +2592,7 @@ input::placeholder, textarea::placeholder { color: #ad9da1; }
   display: grid;
   place-items: center;
   background:
-          radial-gradient(
-                  circle at 50% 12%,
-                  rgba(255, 255, 255, 0.96),
-                  transparent 46%
-          ),
+          radial-gradient(circle at 50% 12%, rgba(255,255,255,.96), transparent 46%),
           var(--red-50);
 }
 

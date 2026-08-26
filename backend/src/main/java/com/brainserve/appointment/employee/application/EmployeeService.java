@@ -31,6 +31,7 @@ import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -486,16 +487,17 @@ public class EmployeeService implements EmployeeDirectory, EmployeeStatistics {
     @Transactional(readOnly = true)
     public EmployeeSummary employeeSummary(UUID employeeId) {
         Employee employee = get(employeeId);
+        return summary(employee);
+    }
 
-        return new EmployeeSummary(
-                employee.getId(),
-                employee.getEmployeeNumber(),
-                employee.getDisplayName(),
-                employee.getOfficialEmail(),
-                employee.getDepartmentId(),
-                employee.getDesignation(),
-                employee.getStatus().name()
-        );
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, EmployeeSummary> employeeSummaries(Set<UUID> employeeIds) {
+        if (employeeIds == null || employeeIds.isEmpty()) return Map.of();
+        java.util.LinkedHashMap<UUID, EmployeeSummary> summaries = new java.util.LinkedHashMap<>();
+        employees.findAllById(employeeIds).forEach(employee ->
+                summaries.put(employee.getId(), summary(employee)));
+        return Map.copyOf(summaries);
     }
 
     @Override
@@ -519,6 +521,18 @@ public class EmployeeService implements EmployeeDirectory, EmployeeStatistics {
                                 employee.getStatus().name()
                         )
                 );
+    }
+
+    private EmployeeSummary summary(Employee employee) {
+        return new EmployeeSummary(
+                employee.getId(),
+                employee.getEmployeeNumber(),
+                employee.getDisplayName(),
+                employee.getOfficialEmail(),
+                employee.getDepartmentId(),
+                employee.getDesignation(),
+                employee.getStatus().name()
+        );
     }
 
     @Override

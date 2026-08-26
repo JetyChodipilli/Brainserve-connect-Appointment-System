@@ -2648,7 +2648,7 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
         })
             .catch(() => { /* My Profile displays the recoverable error when opened. */ });
         return () => { active = false; };
-    }, [userEmail, workspaceRevision]);
+    }, [userEmail]);
 
     useEffect(() => {
         if (!profileMenuOpen) return;
@@ -2676,6 +2676,8 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
     useEffect(() => {
         if (!isBackendConfigured) return;
         let refreshTimer: number | null = null;
+        let lastRefreshAt = Date.now();
+        const minimumRefreshInterval = 15_000;
         const queueSafeRefresh = () => {
             if (refreshTimer) window.clearTimeout(refreshTimer);
             const applyWhenIdle = () => {
@@ -2688,9 +2690,14 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
                     refreshTimer = window.setTimeout(applyWhenIdle, 1_500);
                     return;
                 }
+                lastRefreshAt = Date.now();
                 setWorkspaceRevision((revision) => revision + 1);
             };
-            refreshTimer = window.setTimeout(applyWhenIdle, 500);
+            const elapsed = Date.now() - lastRefreshAt;
+            refreshTimer = window.setTimeout(
+                applyWhenIdle,
+                Math.max(500, minimumRefreshInterval - elapsed),
+            );
         };
         const unsubscribe = subscribeToWorkspaceUpdates(
             () => {
@@ -2769,10 +2776,12 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
                     : role === "Reception"
                         ? brainServeApi.publicDepartments()
                         : brainServeApi.departments();
-                const [employeeResult, departmentResult, summaryResult, assignmentResult,
-                    hrAssignmentResult, managerAssignmentResult] = await Promise.allSettled([
+                const [employeeResult, departmentResult] = await Promise.allSettled([
                     brainServeApi.employees(),
                     departmentRequest,
+                ] as const);
+                const [summaryResult, assignmentResult, hrAssignmentResult,
+                    managerAssignmentResult] = await Promise.allSettled([
                     ["CEO", "HR Admin", "Manager"].includes(role)
                         ? brainServeApi.departmentEmployeeSummary()
                         : Promise.resolve([]),
@@ -2797,7 +2806,7 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
                                 endedAt: null,
                             }])
                             : Promise.resolve([]),
-                ]);
+                ] as const);
                 if (!active) return;
 
                 const departmentList = departmentResult.status === "fulfilled"
@@ -3804,7 +3813,7 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
                                                               onCreate={() => setVisitModal(true)} decideAppointment={decideAppointment}
                                                               onSecurityIntake={setSecurityIntakeAppointment} decideReceptionVisit={decideReceptionVisit}
                                                               forwardReceptionVisit={forwardReceptionVisit} />}
-                {view === "work" && <WorkBoard key={`work:${workspaceRevision}`} role={role} userEmail={userEmail} employees={employees}
+                {view === "work" && <WorkBoard role={role} userEmail={userEmail} employees={employees}
                                                staffAccounts={staffAccounts}
                                                departments={departments} teamLeadAssignments={teamLeadAssignments}
                                                appointments={appointments} decideAppointment={decideAppointment}
@@ -3832,7 +3841,7 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
                                                       onCheckIn={checkInAppointment} onReferenceCheckIn={checkInByReference}
                                                       onPassCheckIn={checkInByPass} onCheckOut={checkOutAppointment}
                                                       decideReceptionVisit={decideReceptionVisit} onRegister={() => setVisitModal(true)} />}
-                {view === "notifications" && <InternalNotificationsView key={`notifications:${workspaceRevision}`} role={role} userEmail={userEmail}
+                {view === "notifications" && <InternalNotificationsView role={role} userEmail={userEmail}
                                                                         onUnreadChange={setUnreadNotifications} />}
                 {view === "organization" && <OrganizationView key={`organization:${workspaceRevision}`} role={role} userEmail={userEmail} departments={departments} employees={employees}
                                                               staffAccounts={staffAccounts}
@@ -5400,10 +5409,12 @@ function WorkBoard({ role, userEmail, employees, staffAccounts, departments, tea
                 setWorkspace(null);
                 setRefreshWarning("");
             } else {
-                const [taskResult, workspaceResult, auditResult, scopeResult] = await Promise.allSettled([
+                const [taskResult, workspaceResult] = await Promise.allSettled([
                     brainServeApi.workTasks(),
                     (["HR Admin", "Team Lead"] as Role[]).includes(role)
                         ? brainServeApi.workTaskWorkspace() : Promise.resolve(null),
+                ] as const);
+                const [auditResult, scopeResult] = await Promise.allSettled([
                     role === "HR Admin" ? brainServeApi.pendingHrWorkInsights() : Promise.resolve([]),
                     (["Manager", "Employee"] as Role[]).includes(role)
                         ? brainServeApi.visibleDepartments() : Promise.resolve([] as Department[]),
@@ -5755,7 +5766,7 @@ function WorkBoard({ role, userEmail, employees, staffAccounts, departments, tea
             <p>Closed older worksheets stay stored for governance and audit, but no longer crowd the daily work board.</p>
         </section>
         <div className="work-toolbar glass-panel"><div><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={queueScope === "TODAY" ? "Search today’s worksheets" : "Search open carry-forward"} /></div><select aria-label="Department scope" value={branchFilter} onChange={(event) => setBranchFilter(event.target.value)} disabled={branches.length <= 1}><option value="ALL">{assignedDepartment ? assignedDepartment.name : "Assigned department"}</option>{branches.length > 1 && branches.map((item) => <option key={item}>{item}</option>)}</select><select aria-label="Worksheet status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="ALL">All statuses</option>{(["ASSIGNED", "IN_PROGRESS", "COMPLETED", "CHANGES_REQUESTED", "INSIGHT_REWORK_REQUESTED", "APPROVED", "ACKNOWLEDGED"] as WorkTask["status"][]).map((item) => <option key={item} value={item}>{workTaskStatusLabel(item)}</option>)}</select></div>
-        {(loadError || refreshWarning) && <div className={`work-refresh-state ${loadError ? "is-error" : "is-warning"}`} role={loadError ? "alert" : "status"}><RotateCcw size={17} aria-hidden="true" /><span><strong>{loadError ? "Work Board could not refresh" : "Showing the last successful update"}</strong><small>{loadError || refreshWarning}</small></span><button type="button" className="button button-secondary" disabled={loading} onClick={() => void load("manual")}>{loading ? "Retrying…" : "Retry now"}</button></div>}
+        {(loadError || refreshWarning) && <div className={`work-refresh-state ${loadError ? "is-error" : "is-warning"}`} role={loadError ? "alert" : "status"}><RotateCcw size={17} aria-hidden="true" /><span><strong>{loadError ? "Work Board is reconnecting" : "Showing the last successful update"}</strong><small>{loadError || refreshWarning} The board refreshes automatically when the service recovers.</small></span></div>}
         <div className="task-sheet-grid">
             {loading && tasks.length === 0 && <div className="empty-state task-sheet-empty work-loading-state" role="status" aria-live="polite"><RotateCcw size={29} /><strong>Loading your department worksheets</strong><small>Existing records will stay visible during future background refreshes.</small></div>}
             {filtered.map((task) => {
@@ -5795,7 +5806,7 @@ function WorkBoard({ role, userEmail, employees, staffAccounts, departments, tea
                         <button type="button" className="button task-sheet-details-toggle" aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpandedTaskId(expanded ? null : task.id)}>{expanded ? "Hide details" : "View details"}<ChevronRight size={15} aria-hidden="true" /></button>
                     </footer>
                 </article>;
-            })}{!loading && filtered.length === 0 && <div className="empty-state task-sheet-empty"><FileText size={29} /><strong>{queueScope === "TODAY" ? "No worksheets on today’s board" : "No open carry-forward work"}</strong><small>{loadError ? "Retry the department workspace connection before treating this as an empty board." : queueScope === "TODAY" ? "New worksheets created today will appear here. Use Open carry-forward for unfinished work from earlier days." : "All older worksheets are closed or no longer require action. Their stored records remain available for governance and audit."}</small></div>}
+            })}{!loading && filtered.length === 0 && <div className="empty-state task-sheet-empty"><FileText size={29} /><strong>{loadError ? "Worksheet data is temporarily unavailable" : queueScope === "TODAY" ? "No worksheets on today’s board" : "No open carry-forward work"}</strong><small>{loadError ? "The last confirmed data will return automatically after the database connection recovers." : queueScope === "TODAY" ? "New worksheets created today will appear here. Use Open carry-forward for unfinished work from earlier days." : "All older worksheets are closed or no longer require action. Their stored records remain available for governance and audit."}</small></div>}
         </div>
         {role === "Team Lead" && <article className="panel glass-panel work-visitor-approvals"><div className="panel-heading"><div><span>VISITOR WORKFLOW</span><h2>Department visitor approvals</h2><p>Visitor approval remains available here so removing Appointments never breaks Security → Reception → HR routing.</p></div><b>{pendingVisitorApprovals.length}</b></div>{pendingVisitorApprovals.map((item) => <div className="approval-item" key={item.id}><div className="approval-person"><span className="avatar">{item.initials}</span><span><strong>{item.visitor}</strong><small>Visiting {item.host} · {item.referenceNumber}</small></span></div><p>“{item.arrivalPurpose ?? item.purpose}”</p><div className="approval-actions"><button className="button button-reject" onClick={() => void decideAppointment(item.id, "reject")}><X size={15} /> Reject visit</button><button className="button button-approve" onClick={() => void decideAppointment(item.id, "approve")}><Check size={15} /> Approve visit</button></div></div>)}{pendingVisitorApprovals.length === 0 && <div className="empty-state"><ShieldCheck size={27} /><strong>No visitor approvals waiting</strong><small>HR-routed department visitors will appear here.</small></div>}</article>}
         {actionDialog && taskActionCopy && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setActionDialog(null); }}><section className="modal work-action-modal" role="dialog" aria-modal="true" aria-labelledby="work-action-title"><header><div><span>WORKSHEET ACTION</span><h2 id="work-action-title">{taskActionCopy[0]}</h2><p>{taskActionCopy[1]}</p></div><button className="icon-button" type="button" onClick={() => setActionDialog(null)} aria-label="Close worksheet action"><X size={18} /></button></header><form onSubmit={submitTaskAction}><div className="work-action-context"><span className="avatar">{visitorInitials(employeeName(actionDialog.task.employeeId))}</span><span><small>{actionDialog.task.departmentBranch} · {workTaskStatusLabel(actionDialog.task.status)}</small><strong>{actionDialog.task.title}</strong></span></div>{actionDialog.action === "insight-rework" && <div className="modal-review-source"><RotateCcw size={16} /><span><small>{actionDialog.task.insightReviewSource === "CEO" ? "CEO FEEDBACK" : actionDialog.task.insightReviewSource === "MANAGER" ? "MANAGER FEEDBACK" : "HR FEEDBACK"}</small><strong>{actionDialog.task.insightReviewReason}</strong></span></div>}<label>{taskActionCopy[2]}<textarea value={actionNote} onChange={(event) => setActionNote(event.target.value)} placeholder={taskActionCopy[3]} minLength={["complete", "request-changes", "insight-rework", "hr-rework"].includes(actionDialog.action) ? 5 : undefined} maxLength={1000} required={["complete", "request-changes", "insight-rework", "hr-rework"].includes(actionDialog.action)} autoFocus /></label><small className="dialog-character-count">{actionNote.length}/1000</small>{error && <div className="login-error" role="alert">{error}</div>}<div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setActionDialog(null)}>Cancel</button><button className="button button-primary" disabled={Boolean(busy)}>{busy ? "Saving…" : taskActionCopy[4]}<ArrowRight size={15} /></button></div></form></section></div>}
@@ -9054,6 +9065,7 @@ function InternalNotificationsView({ role, userEmail, onUnreadChange }: {
     const [error, setError] = useState("");
     const [loadError, setLoadError] = useState("");
     const [refreshWarning, setRefreshWarning] = useState("");
+    const [recipientLoadFailed, setRecipientLoadFailed] = useState(false);
     const notificationLoadInFlightRef = useRef(false);
     const notificationsLoadedRef = useRef(false);
 
@@ -9074,13 +9086,16 @@ function InternalNotificationsView({ role, userEmail, onUnreadChange }: {
                 setRecipientId((current) => nextRecipients.some((item) => item.userId === current)
                     ? current : nextRecipients[0]?.userId ?? "");
                 onUnreadChange(nextInbox.filter((item) => !item.readAt).length);
+                setRecipientLoadFailed(false);
                 notificationsLoadedRef.current = true;
                 setLoadError(""); setRefreshWarning("");
                 return;
             }
 
-            const [recipientResult, inboxResult, sentResult, archiveResult] = await Promise.allSettled([
+            const [recipientResult] = await Promise.allSettled([
                 brainServeApi.internalNotificationRecipients(),
+            ] as const);
+            const [inboxResult, sentResult, archiveResult] = await Promise.allSettled([
                 brainServeApi.internalNotificationInbox(),
                 brainServeApi.internalNotificationSent(),
                 includeArchive ? brainServeApi.internalNotificationArchive() : Promise.resolve(null),
@@ -9093,8 +9108,12 @@ function InternalNotificationsView({ role, userEmail, onUnreadChange }: {
                 setRecipients(nextRecipients);
                 setRecipientId((current) => nextRecipients.some((item) => item.userId === current)
                     ? current : nextRecipients[0]?.userId ?? "");
+                setRecipientLoadFailed(false);
                 successfulSections += 1;
-            } else failures.push("recipients");
+            } else {
+                setRecipientLoadFailed(true);
+                failures.push("recipients");
+            }
 
             if (inboxResult.status === "fulfilled") {
                 setInbox(inboxResult.value);
@@ -9119,7 +9138,7 @@ function InternalNotificationsView({ role, userEmail, onUnreadChange }: {
                 setRefreshWarning(failures.length
                     ? `Some sections could not refresh (${failures.join(", ")}). Other message data remains available.` : "");
             } else {
-                const fallback = "Notifications could not be refreshed. Check the backend connection and retry.";
+                const fallback = "Notifications are waiting for the backend service to recover.";
                 if (notificationsLoadedRef.current) setRefreshWarning(`${fallback} The last successful message data remains visible.`);
                 else setLoadError(fallback);
             }
@@ -9306,7 +9325,7 @@ function InternalNotificationsView({ role, userEmail, onUnreadChange }: {
     return <section className="internal-notifications-page">
         <PageTitle eyebrow="BRAINSERVE INTERNAL DELIVERY" title="Priority calls & conversations"
                    detail="Today’s urgent and unread requests rise to the top. Earlier messages are stored safely in Archive." />
-        {(loadError || refreshWarning) && <div className={`work-refresh-state ${loadError ? "is-error" : "is-warning"}`} role={loadError ? "alert" : "status"}><RotateCcw size={17} aria-hidden="true" /><span><strong>{loadError ? "Message service could not refresh" : "Some message data is temporarily stale"}</strong><small>{loadError || refreshWarning}</small></span><button type="button" className="button button-secondary" onClick={() => void loadData(tab === "archive")}>Retry now</button></div>}
+        {(loadError || refreshWarning) && <div className={`work-refresh-state ${loadError ? "is-error" : "is-warning"}`} role={loadError ? "alert" : "status"}><RotateCcw size={17} aria-hidden="true" /><span><strong>{loadError ? "Message service is reconnecting" : "Some message data is temporarily stale"}</strong><small>{loadError || refreshWarning} This view refreshes automatically.</small></span></div>}
         <div className="notification-attention glass-panel"><div><strong>{inbox.filter((item) => !item.readAt).length}</strong><span>Unread</span><small>Needs acknowledgement</small></div><i /><div><strong>{inbox.filter((item) => item.priority === "URGENT" && !item.readAt).length}</strong><span>Urgent</span><small>Handle first</small></div><i /><div><strong>{conversations.length}</strong><span>Conversations</span><small>Grouped by person</small></div></div>
         <div className="notification-workspace">
             <article className="panel glass-panel notification-composer" id="internal-message-composer">
@@ -9321,8 +9340,9 @@ function InternalNotificationsView({ role, userEmail, onUnreadChange }: {
                     <div className="quick-message-list">{quickMessages.map((value) => <button type="button" key={value} onClick={() => setDraft(value)}>{value}</button>)}</div>
                     <div className="message-limit"><span>{priority === "URGENT" ? "Urgent messages are placed first" : "BrainServe Connect real-time delivery"}</span><span>{draft.length}/500</span></div>
                     <button className="button button-primary" disabled={busy}><Send size={16} />{busy ? "Sending…" : "Send internal call"}</button>
-                </form> : <div className="empty-state notification-policy-empty"><MessageSquare size={28} /><strong>No sending route for this role</strong>
-                    <small>No active permitted recipients are available for your role.</small></div>}
+                </form> : recipientLoadFailed
+                    ? <div className="empty-state notification-policy-empty" role="status"><RotateCcw size={28} /><strong>Recipient directory is reconnecting</strong><small>Your permitted recipients will return automatically; no role access has been removed.</small></div>
+                    : <div className="empty-state notification-policy-empty"><MessageSquare size={28} /><strong>No sending route for this role</strong><small>No active permitted recipients are available for your role.</small></div>}
             </article>
 
             <article className="panel glass-panel notification-inbox-panel">

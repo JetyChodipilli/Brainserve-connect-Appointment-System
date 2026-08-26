@@ -1,6 +1,8 @@
 package com.brainserve.appointment.iam.application;
 
 import com.brainserve.appointment.iam.api.StaffCommunicationDirectory;
+import com.brainserve.appointment.iam.domain.AccountStatus;
+import com.brainserve.appointment.iam.domain.SystemRole;
 import com.brainserve.appointment.iam.domain.UserAccount;
 import com.brainserve.appointment.iam.infrastructure.UserAccountRepository;
 import com.brainserve.appointment.shared.application.BusinessException;
@@ -13,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class StaffCommunicationDirectoryService implements StaffCommunicationDirectory {
@@ -51,42 +54,26 @@ public class StaffCommunicationDirectoryService implements StaffCommunicationDir
     @Override
     @Transactional(readOnly = true)
     public List<StaffMember> activeWithAnyRole(Set<String> roles) {
-        java.util.LinkedHashMap<UUID, StaffMember> members = new java.util.LinkedHashMap<>();
-        roles.stream().map(role -> {
-            try {
-                return java.util.Optional.of(com.brainserve.appointment.iam.domain.SystemRole.valueOf(role));
-            } catch (IllegalArgumentException ignored) {
-                return java.util.Optional.<com.brainserve.appointment.iam.domain.SystemRole>empty();
-            }
-        }).flatMap(java.util.Optional::stream).forEach(role ->
-                users.findDistinctByRolesContainingAndStatusAndEnabledTrueAndArchivedFalse(
-                                role, com.brainserve.appointment.iam.domain.AccountStatus.ACTIVE)
-                        .forEach(user -> members.putIfAbsent(user.getId(), member(user))));
-        return members.values().stream()
-                .sorted(java.util.Comparator.comparing(StaffMember::fullName)).toList();
+        Set<SystemRole> resolvedRoles = resolveRoles(roles);
+        if (resolvedRoles.isEmpty()) return List.of();
+        return users.findActiveWithAnyRole(resolvedRoles, AccountStatus.ACTIVE)
+                .stream()
+                .map(this::member)
+                .toList();
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<StaffMember> activeWithAnyRoleInDepartment(Set<String> roles, UUID departmentId, int limit) {
         if (roles == null || roles.isEmpty() || departmentId == null) return List.of();
+        Set<SystemRole> resolvedRoles = resolveRoles(roles);
+        if (resolvedRoles.isEmpty()) return List.of();
         int pageSize = Math.max(1, Math.min(limit, 200));
         var pageable = PageRequest.of(0, pageSize, Sort.by(Sort.Direction.ASC, "fullName"));
-        java.util.LinkedHashMap<UUID, StaffMember> members = new java.util.LinkedHashMap<>();
-        roles.stream().map(role -> {
-            try {
-                return java.util.Optional.of(com.brainserve.appointment.iam.domain.SystemRole.valueOf(role));
-            } catch (IllegalArgumentException ignored) {
-                return java.util.Optional.<com.brainserve.appointment.iam.domain.SystemRole>empty();
-            }
-        }).flatMap(java.util.Optional::stream).forEach(role ->
-                users.findOperationalAccounts(
-                                com.brainserve.appointment.iam.domain.AccountStatus.ACTIVE,
-                                "", role, departmentId, pageable)
-                        .forEach(user -> members.putIfAbsent(user.getId(), member(user))));
-        return members.values().stream()
-                .sorted(java.util.Comparator.comparing(StaffMember::fullName))
-                .limit(pageSize)
+        return users.findActiveWithAnyRoleInDepartment(
+                        resolvedRoles, AccountStatus.ACTIVE, departmentId, pageable)
+                .stream()
+                .map(this::member)
                 .toList();
     }
 
@@ -110,5 +97,19 @@ public class StaffCommunicationDirectoryService implements StaffCommunicationDir
     private StaffMember member(UserAccount user) {
         return new StaffMember(user.getId(), user.getEmployeeId(), user.getFullName(), user.getEmail(),
                 user.getRoles().stream().map(Enum::name).collect(java.util.stream.Collectors.toUnmodifiableSet()));
+    }
+
+    private Set<SystemRole> resolveRoles(Set<String> roles) {
+        if (roles == null || roles.isEmpty()) return Set.of();
+        return roles.stream()
+                .map(role -> {
+                    try {
+                        return java.util.Optional.of(SystemRole.valueOf(role));
+                    } catch (IllegalArgumentException ignored) {
+                        return java.util.Optional.<SystemRole>empty();
+                    }
+                })
+                .flatMap(java.util.Optional::stream)
+                .collect(Collectors.toUnmodifiableSet());
     }
 }

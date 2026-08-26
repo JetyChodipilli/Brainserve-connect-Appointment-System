@@ -4,6 +4,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.time.LocalDate;
 import java.util.UUID;
 
@@ -20,6 +22,7 @@ public interface EmployeeDirectory {
     void terminateAfterApproval(UUID employeeId, LocalDate effectiveDate);
     boolean isChiefExecutive(UUID employeeId);
     EmployeeSummary employeeSummary(UUID employeeId);
+    Map<UUID, EmployeeSummary> employeeSummaries(Set<UUID> employeeIds);
     Page<DepartmentMember> departmentMembers(UUID departmentId, Pageable pageable);
     Page<PublicEmployee> publicActiveEmployees(UUID departmentId, String query, Pageable pageable);
     List<HostSummary> activeHosts();

@@ -37,7 +37,10 @@ test("today message deletion is blocked by the backend and every deletion is log
 test("notification sections fail independently and background polling cannot overlap", () => {
   assert.match(ui, /notificationLoadInFlightRef\.current/);
   assert.match(ui, /notificationsLoadedRef\.current/);
-  assert.match(ui, /const \[recipientResult, inboxResult, sentResult, archiveResult\] = await Promise\.allSettled/);
+  assert.match(ui, /const \[recipientResult\] = await Promise\.allSettled/);
+  assert.match(ui, /const \[inboxResult, sentResult, archiveResult\] = await Promise\.allSettled/);
+  assert.match(ui, /recipientLoadFailed/);
+  assert.match(ui, /Recipient directory is reconnecting/);
   assert.match(ui, /Other message data remains available/);
   assert.match(ui, /Some message data is temporarily stale/);
   assert.match(ui, /window\.setInterval\(refresh, 30000\)/);

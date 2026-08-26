@@ -187,11 +187,20 @@ public class DepartmentWorkTaskService implements WorkTaskDirectory {
         }
 
         OrganizationDirectory.ActiveDepartment department = organization.requireActiveDepartment(departmentId);
+        List<StaffCommunicationDirectory.StaffMember> departmentMembers =
+                staff.activeWithAnyRoleInDepartment(Set.of(EMPLOYEE, TEAM_LEAD), departmentId, 200);
+        Set<UUID> employeeIds = departmentMembers.stream()
+                .map(StaffCommunicationDirectory.StaffMember::employeeId)
+                .filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        java.util.Map<UUID, EmployeeDirectory.EmployeeSummary> employeeSummaries =
+                employees.employeeSummaries(employeeIds);
+
         List<EligibleAssignee> eligible = new ArrayList<>();
-        for (StaffCommunicationDirectory.StaffMember member
-                : staff.activeWithAnyRoleInDepartment(Set.of(EMPLOYEE, TEAM_LEAD), departmentId, 200)) {
+        for (StaffCommunicationDirectory.StaffMember member : departmentMembers) {
             if (member.employeeId() == null || member.employeeId().equals(excludedEmployeeId)) continue;
-            EmployeeDirectory.EmployeeSummary employee = employees.employeeSummary(member.employeeId());
+            EmployeeDirectory.EmployeeSummary employee = employeeSummaries.get(member.employeeId());
+            if (employee == null) continue;
             if (!departmentId.equals(employee.departmentId()) || !"ACTIVE".equals(employee.status())) continue;
 
             boolean assignedTeamLead = activeLead != null

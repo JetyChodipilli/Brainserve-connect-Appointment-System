@@ -116,7 +116,9 @@ test("work board refreshes are isolated, non-overlapping and preserve the last g
   assert.ok(app.includes("await Promise.allSettled(["));
   assert.ok(app.includes("The last loaded worksheets remain visible"));
   assert.ok(app.includes('document.visibilityState === "visible"'));
-  assert.ok(app.includes('void load("manual")'));
+  assert.ok(app.includes('void load("background")'));
+  assert.equal(app.includes('void load("manual")'), false);
+  assert.equal(app.includes("key={`work:${workspaceRevision}`"), false);
 });
 
 test("HR and Manager retain a visible department scope even on an empty daily board", () => {

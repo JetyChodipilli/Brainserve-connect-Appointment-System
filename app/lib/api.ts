@@ -5,6 +5,7 @@ export const isBackendConfigured = Boolean(configuredApiBaseUrl);
 const API_BASE_URL = configuredApiBaseUrl ?? "";
 const API_REQUEST_TIMEOUT_MS = 20_000;
 const AUTH_SESSION_EXPIRED_EVENT = "brainserve:auth-session-expired";
+const inFlightGetRequests = new Map<string, Promise<unknown>>();
 
 type ProblemResponse = {
   title?: string;
@@ -438,7 +439,23 @@ async function refreshAccessToken() {
   return refreshPromise;
 }
 
-export async function apiRequest<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
+export function apiRequest<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
+  const method = (init.method ?? "GET").toUpperCase();
+  if (method !== "GET" || init.signal) return performApiRequest<T>(path, init, retry);
+
+  const existing = inFlightGetRequests.get(path);
+  if (existing) return existing as Promise<T>;
+
+  const request = performApiRequest<T>(path, init, retry);
+  inFlightGetRequests.set(path, request);
+  const clearRequest = () => {
+    if (inFlightGetRequests.get(path) === request) inFlightGetRequests.delete(path);
+  };
+  void request.then(clearRequest, clearRequest);
+  return request;
+}
+
+async function performApiRequest<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
   if (!API_BASE_URL) {
     throw new Error("BrainServe Connect is not connected to its secure backend.");
   }
@@ -457,7 +474,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}, retry 
       ...init, headers, credentials: "omit", signal: controller.signal,
     });
     if (response.status === 401 && retry && refreshToken && !path.endsWith("/auth/refresh") && !path.endsWith("/auth/login")) {
-      if (await refreshAccessToken()) return apiRequest<T>(path, init, false);
+      if (await refreshAccessToken()) return performApiRequest<T>(path, init, false);
     }
     if (!response.ok) {
       const problem = (await response.json().catch(() => ({}))) as ProblemResponse;

@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -27,6 +28,7 @@ import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
+import org.springframework.transaction.CannotCreateTransactionException;
 
 import java.io.IOException;
 import java.net.URI;
@@ -269,6 +271,33 @@ public class GlobalExceptionHandler {
                 HttpStatus.CONFLICT,
                 "DATA_CONFLICT",
                 "The request conflicts with an existing record",
+                request,
+                null
+        );
+    }
+
+    @ExceptionHandler({
+            DataAccessResourceFailureException.class,
+            CannotCreateTransactionException.class
+    })
+    public ProblemDetail databaseUnavailable(
+            Exception ex,
+            HttpServletRequest request
+    ) {
+        log.warn(
+                "Database unavailable correlationId={} path={}",
+                correlationId(),
+                request.getRequestURI()
+        );
+        log.debug(
+                "Database availability failure correlationId={}",
+                correlationId(),
+                ex
+        );
+        return problem(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                "DATABASE_UNAVAILABLE",
+                "The database is temporarily unavailable. The request was not processed.",
                 request,
                 null
         );

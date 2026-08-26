@@ -22,6 +22,8 @@ import org.springframework.transaction.support.TransactionOperations;
 import java.util.LinkedHashSet;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -79,9 +81,12 @@ public class InternalCallNotificationService implements InternalNotificationGate
         var sender = staff.requireActive(senderUserId);
         Set<String> targetRoles = allowedRecipientRoles(sender.roles());
         if (targetRoles.isEmpty()) return List.of();
-        return staff.activeWithAnyRole(targetRoles).stream()
+        List<StaffCommunicationDirectory.StaffMember> candidates = staff.activeWithAnyRole(targetRoles).stream()
                 .filter(recipient -> !recipient.userId().equals(senderUserId))
-                .filter(recipient -> isWithinManualMessageScope(sender, recipient))
+                .toList();
+        Map<UUID, UUID> departmentsByEmployee = recipientDepartmentScope(sender, candidates);
+        return candidates.stream()
+                .filter(recipient -> isWithinManualMessageScope(sender, recipient, departmentsByEmployee))
                 .toList();
     }
 
@@ -554,15 +559,49 @@ public class InternalCallNotificationService implements InternalNotificationGate
 
     private boolean isWithinManualMessageScope(StaffCommunicationDirectory.StaffMember sender,
                                                StaffCommunicationDirectory.StaffMember recipient) {
-        boolean departmentBound = sender.roles().contains(MANAGER) && recipient.roles().contains(HR)
+        if (!requiresDepartmentMatch(sender, recipient)) return true;
+        if (sender.employeeId() == null || recipient.employeeId() == null) return false;
+        return employees.departmentIdForEmployee(sender.employeeId())
+                .equals(employees.departmentIdForEmployee(recipient.employeeId()));
+    }
+
+    private boolean isWithinManualMessageScope(StaffCommunicationDirectory.StaffMember sender,
+                                               StaffCommunicationDirectory.StaffMember recipient,
+                                               Map<UUID, UUID> departmentsByEmployee) {
+        if (!requiresDepartmentMatch(sender, recipient)) return true;
+        if (sender.employeeId() == null || recipient.employeeId() == null) return false;
+        UUID senderDepartment = departmentsByEmployee.get(sender.employeeId());
+        UUID recipientDepartment = departmentsByEmployee.get(recipient.employeeId());
+        return senderDepartment != null && Objects.equals(senderDepartment, recipientDepartment);
+    }
+
+    private Map<UUID, UUID> recipientDepartmentScope(
+            StaffCommunicationDirectory.StaffMember sender,
+            List<StaffCommunicationDirectory.StaffMember> candidates) {
+        if (sender.employeeId() == null
+                || candidates.stream().noneMatch(recipient -> requiresDepartmentMatch(sender, recipient))) {
+            return Map.of();
+        }
+        Set<UUID> employeeIds = new LinkedHashSet<>();
+        employeeIds.add(sender.employeeId());
+        candidates.stream()
+                .filter(recipient -> requiresDepartmentMatch(sender, recipient))
+                .map(StaffCommunicationDirectory.StaffMember::employeeId)
+                .filter(Objects::nonNull)
+                .forEach(employeeIds::add);
+        return employees.employeeSummaries(employeeIds).values().stream()
+                .collect(java.util.stream.Collectors.toUnmodifiableMap(
+                        EmployeeDirectory.EmployeeSummary::id,
+                        EmployeeDirectory.EmployeeSummary::departmentId));
+    }
+
+    private boolean requiresDepartmentMatch(StaffCommunicationDirectory.StaffMember sender,
+                                            StaffCommunicationDirectory.StaffMember recipient) {
+        return sender.roles().contains(MANAGER) && recipient.roles().contains(HR)
                 || sender.roles().contains(HR)
                 && (recipient.roles().contains(TEAM_LEAD) || recipient.roles().contains(EMPLOYEE))
                 || sender.roles().contains(TEAM_LEAD) && recipient.roles().contains(HR)
                 || sender.roles().contains(EMPLOYEE) && recipient.roles().contains(HR);
-        if (!departmentBound) return true;
-        if (sender.employeeId() == null || recipient.employeeId() == null) return false;
-        return employees.departmentIdForEmployee(sender.employeeId())
-                .equals(employees.departmentIdForEmployee(recipient.employeeId()));
     }
 
     private void broadcast(StaffCommunicationDirectory.StaffMember sender, Set<String> roles, String message) {
