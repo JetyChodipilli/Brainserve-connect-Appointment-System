@@ -261,12 +261,12 @@ class InternalCallNotificationServiceTest {
         when(persisted.getRecipientUserId()).thenReturn(recipientId);
         when(persisted.getMessage()).thenReturn("Durable delivery");
         when(persisted.getSentAt()).thenReturn(Instant.now());
+        when(persisted.getDeliveryAttempts()).thenReturn(1);
         when(notifications.lockReadyForDelivery(
                 eq(Set.of(InternalCallNotification.DeliveryStatus.FAILED,
                         InternalCallNotification.DeliveryStatus.QUEUED)),
                 any(Instant.class), any(org.springframework.data.domain.Pageable.class)))
                 .thenReturn(List.of(persisted));
-        when(notifications.findById(notificationId)).thenReturn(Optional.of(persisted));
         var sent = new CompletableFuture<org.springframework.kafka.support.SendResult<String, InternalCallEvent>>();
         sent.complete(null);
         when(kafka.send(eq("brainserve.internal-calls.v1"), eq(recipientId.toString()),
@@ -277,7 +277,8 @@ class InternalCallNotificationServiceTest {
         verify(persisted).beginDeliveryAttempt(any(Instant.class));
         verify(kafka).send(eq("brainserve.internal-calls.v1"), eq(recipientId.toString()),
                 any(InternalCallEvent.class));
-        verify(persisted).markPublished(any(Instant.class), any(Instant.class));
+        verify(notifications).markPublishedIfUnacknowledged(eq(notificationId), eq(1),
+                any(Instant.class), any(Instant.class));
     }
 
     @Test

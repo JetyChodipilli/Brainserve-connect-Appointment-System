@@ -34,11 +34,11 @@ jobs:
       - name: Run lint
         run: npm run lint
 
-      - name: Run source and regression tests
-        run: node --test tests/*.test.mjs
-
       - name: Build frontend
         run: npm run build
+
+      - name: Run source and regression tests
+        run: node --test tests/*.test.mjs
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium firefox webkit
@@ -72,5 +72,6 @@ jobs:
           mvn -version
 
       - name: Compile and test backend
+        env:
+          QR_PASS_SIGNING_SECRET: ci-only-qr-pass-signing-secret-at-least-thirty-two-characters
         run: mvn --batch-mode --no-transfer-progress clean verify
-
