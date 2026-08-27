@@ -34,6 +34,12 @@ public class WorkInsightController {
         return service.pendingHrAudit(actor(jwt));
     }
 
+    @GetMapping("/task-workflow-states")
+    @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEAD') and hasAuthority('WORK_TASK_READ')")
+    List<WorkInsightService.TaskWorkflowState> taskWorkflowStates(@AuthenticationPrincipal Jwt jwt) {
+        return service.taskWorkflowStates(actor(jwt));
+    }
+
     @PostMapping("/tasks/{taskId}/audit")
     @PreAuthorize("hasRole('HR_ADMIN') and hasAuthority('WORK_INSIGHT_AUDIT')")
     WorkInsightService.Insight audit(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID taskId) {

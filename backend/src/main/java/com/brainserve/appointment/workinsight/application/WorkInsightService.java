@@ -6,12 +6,14 @@ import com.brainserve.appointment.employee.api.EmployeeDirectory;
 import com.brainserve.appointment.iam.api.StaffCommunicationDirectory;
 import com.brainserve.appointment.manager.api.ManagerDirectory;
 import com.brainserve.appointment.shared.application.BusinessException;
+
 import com.brainserve.appointment.workinsight.api.WorkInsightEvents;
 import com.brainserve.appointment.workinsight.domain.WorkInsightStatus;
 import com.brainserve.appointment.workinsight.domain.WorkTaskAuditRecord;
 import com.brainserve.appointment.workinsight.infrastructure.WorkTaskAuditRecordRepository;
 import com.brainserve.appointment.worktask.api.WorkTaskDirectory;
 import com.brainserve.appointment.worktask.api.WorkTaskDirectory.TaskSnapshot;
+import com.brainserve.appointment.worktask.api.WorkTaskEvents;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
@@ -36,6 +38,7 @@ public class WorkInsightService {
     private static final String MANAGER = "ROLE_MANAGER";
     private static final String CEO = "ROLE_CEO";
     private static final String SYSTEM_ADMIN = "ROLE_SYSTEM_ADMIN";
+    private static final String TEAM_LEAD = "ROLE_TEAM_LEAD";
     private static final String TEAM_LEAD_ASSIGNEE = "TEAM_LEAD";
 
     private final ZoneId officeZone;
@@ -117,6 +120,25 @@ public class WorkInsightService {
                     return record == null || record.getAuditStatus() == WorkInsightStatus.REWORK_ASSIGNED;
                 })
                 .map(task -> liveInsight(task, retained.get(task.id())))
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<TaskWorkflowState> taskWorkflowStates(UUID userId) {
+        StaffCommunicationDirectory.StaffMember member = staff.requireActive(userId);
+        List<WorkTaskAuditRecord> records;
+        if (member.roles().contains(TEAM_LEAD)) {
+            records = audits.findTop500ByTeamLeadUserIdOrderByHrAuditedAtDesc(userId);
+        } else if (member.roles().contains("ROLE_EMPLOYEE") && member.employeeId() != null) {
+            records = audits.findTop500ByEmployeeIdOrderByHrAuditedAtDesc(member.employeeId());
+        } else {
+            throw new BusinessException("WORK_TASK_WORKFLOW_STATE_DENIED",
+                    "Only the assigned Employee or Team Lead can inspect worksheet workflow states",
+                    HttpStatus.FORBIDDEN);
+        }
+        return records.stream()
+                .map(record -> new TaskWorkflowState(record.getWorkTaskId(),
+                        record.getAuditStatus().name()))
                 .toList();
     }
 
@@ -246,32 +268,113 @@ public class WorkInsightService {
     }
 
     @Transactional
-    public Insight decideByCeo(UUID ceoUserId, UUID recordId, boolean approved, String remarks) {
-        requireRole(ceoUserId, CEO, "Only the CEO can decide a work audit");
+    public Insight decideByCeo(
+            UUID ceoUserId,
+            UUID recordId,
+            boolean approved,
+            String remarks
+    ) {
+        requireRole(
+                ceoUserId,
+                CEO,
+                "Only the CEO can decide a work audit"
+        );
+
         WorkTaskAuditRecord record = requireRecord(recordId);
         record.decideByCeo(ceoUserId, approved, remarks);
+
+        TaskSnapshot task;
+
         if (!approved) {
             requireAuditReadyTask(record.getWorkTaskId());
-            TaskSnapshot task = tasks.requestInsightRework(record.getWorkTaskId(), "CEO", remarks);
+
+            task = tasks.requestInsightRework(
+                    record.getWorkTaskId(),
+                    "CEO",
+                    remarks
+            );
+
             record.syncTaskStatus(task.status());
-            events.publishEvent(new WorkInsightEvents.ReworkRequested(ceoUserId,
-                    record.getTeamLeadUserId(), "CEO returned worksheet ‘" + record.getTaskTitle()
-                    + "’ for rework. Flaws noted: " + remarks.trim()
-                    + ". Open Work Board and create the corrective plan."));
+
+            events.publishEvent(
+                    new WorkInsightEvents.ReworkRequested(
+                            ceoUserId,
+                            record.getTeamLeadUserId(),
+                            "CEO returned worksheet ‘"
+                                    + record.getTaskTitle()
+                                    + "’ for rework. Flaws noted: "
+                                    + remarks.trim()
+                                    + ". Open Work Board and create the corrective plan."
+                    )
+            );
+        } else {
+            task = tasks.finalizeInsightApproval(record.getWorkTaskId());
+            record.syncTaskStatus(task.status());
+
+            String finalMessage =
+                    "CEO gave final approval to worksheet ‘"
+                            + record.getTaskTitle()
+                            + "’. The governance cycle is complete and the worksheet is closed.";
+
+            UUID assigneeUserId =
+                    TEAM_LEAD_ASSIGNEE.equals(task.assigneeRole())
+                            ? task.teamLeadUserId()
+                            : staff.activeByEmployeeId(task.employeeId())
+                            .map(StaffCommunicationDirectory.StaffMember::userId)
+                            .orElse(null);
+
+            if (assigneeUserId != null) {
+                events.publishEvent(
+                        new WorkInsightEvents.FinalApprovalRecipient(
+                                ceoUserId,
+                                assigneeUserId,
+                                finalMessage
+                        )
+                );
+            }
+
+            if (!task.teamLeadUserId().equals(assigneeUserId)) {
+                events.publishEvent(
+                        new WorkInsightEvents.FinalApprovalRecipient(
+                                ceoUserId,
+                                task.teamLeadUserId(),
+                                finalMessage
+                        )
+                );
+            }
         }
-        events.publishEvent(new WorkInsightEvents.CeoDecisionRecorded(ceoUserId,
-                record.getHrAuditedByUserId(), "CEO "
-                + (approved ? "approved" : "returned for rework")
-                + " the work audit for ‘" + record.getTaskTitle() + "’ assigned to "
-                + record.getEmployeeName()
-                + (approved ? "." : ". Reason: " + remarks.trim())));
-        audit.record(approved ? "WORK_INSIGHT_CEO_APPROVED"
+
+        events.publishEvent(
+                new WorkInsightEvents.CeoDecisionRecorded(
+                        ceoUserId,
+                        record.getHrAuditedByUserId(),
+                        "CEO "
+                                + (approved
+                                ? "approved"
+                                : "returned for rework")
+                                + " the work audit for ‘"
+                                + record.getTaskTitle()
+                                + "’ assigned to "
+                                + record.getEmployeeName()
+                                + (approved
+                                ? "."
+                                : ". Reason: " + remarks.trim())
+                )
+        );
+
+        audit.record(
+                approved
+                        ? "WORK_INSIGHT_CEO_APPROVED"
                         : "WORK_INSIGHT_CEO_REWORK_REQUESTED",
-                "WORK_TASK_AUDIT", record.getId().toString(),
-                "{\"workTaskId\":\"" + record.getWorkTaskId() + "\"}");
+                "WORK_TASK_AUDIT",
+                record.getId().toString(),
+                "{\"workTaskId\":\""
+                        + record.getWorkTaskId()
+                        + "\"}"
+        );
+
         return retainedInsight(record);
     }
-
     private WorkTaskAuditRecord requireRecord(UUID recordId) {
         return audits.findById(recordId).orElseThrow(() -> new BusinessException(
                 "WORK_INSIGHT_NOT_FOUND", "The weekly work audit was not found", HttpStatus.NOT_FOUND));
@@ -379,4 +482,6 @@ public class WorkInsightService {
                           String reworkReason, Instant reworkRequestedAt,
                           String teamLeadReworkGuidance, Instant teamLeadRespondedAt,
                           int reworkCycle) {}
+
+    public record TaskWorkflowState(UUID workTaskId, String auditStatus) {}
 }

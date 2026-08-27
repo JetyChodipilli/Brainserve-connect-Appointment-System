@@ -14,4 +14,6 @@ public interface WorkTaskAuditRecordRepository extends JpaRepository<WorkTaskAud
     List<WorkTaskAuditRecord> findTop1000ByWeekStartAndDepartmentIdOrderByHrAuditedAtDesc(
             LocalDate weekStart, UUID departmentId);
     List<WorkTaskAuditRecord> findTop1000ByDepartmentIdOrderByHrAuditedAtDesc(UUID departmentId);
+    List<WorkTaskAuditRecord> findTop500ByTeamLeadUserIdOrderByHrAuditedAtDesc(UUID teamLeadUserId);
+    List<WorkTaskAuditRecord> findTop500ByEmployeeIdOrderByHrAuditedAtDesc(UUID employeeId);
 }

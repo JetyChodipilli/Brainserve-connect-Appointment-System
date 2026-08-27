@@ -53,6 +53,36 @@ class WorkTaskAuditRecordTest {
     }
 
     @Test
+    void repeatedManagerAndCeoRejectionsCanBeReworkedToFinalApproval() {
+        WorkTaskAuditRecord record = record();
+
+        record.decideByManager(UUID.randomUUID(), false, "Manager needs exception evidence");
+        record.assignRework("Attach the exception evidence", "CHANGES_REQUESTED");
+        record.resubmit(UUID.randomUUID(), "APPROVED");
+        record.decideByManager(UUID.randomUUID(), true, "Manager evidence accepted");
+        record.decideByCeo(UUID.randomUUID(), false, "CEO needs recovery evidence");
+        record.assignRework("Attach the recovery evidence", "CHANGES_REQUESTED");
+        record.resubmit(UUID.randomUUID(), "APPROVED");
+        record.decideByManager(UUID.randomUUID(), true, "All evidence accepted");
+        record.decideByCeo(UUID.randomUUID(), true, "Final approval");
+
+        assertThat(record.getAuditStatus()).isEqualTo(WorkInsightStatus.CEO_APPROVED);
+        assertThat(record.getReworkCycle()).isEqualTo(2);
+    }
+
+    @Test
+    void hrCanReturnEveryCompletedReworkCycleBeforeManagerReview() {
+        WorkTaskAuditRecord record = record();
+
+        record.requestHrRework(UUID.randomUUID(), "HR needs stronger evidence");
+        record.assignRework("Add HR evidence", "CHANGES_REQUESTED");
+        record.requestHrRework(UUID.randomUUID(), "The corrected evidence is incomplete");
+
+        assertThat(record.getAuditStatus()).isEqualTo(WorkInsightStatus.HR_REWORK_REQUESTED);
+        assertThat(record.getReworkCycle()).isEqualTo(2);
+    }
+
+    @Test
     void rejectionRequiresReason() {
         assertThatThrownBy(() -> record().decideByManager(UUID.randomUUID(), false, " "))
                 .isInstanceOf(BusinessException.class)

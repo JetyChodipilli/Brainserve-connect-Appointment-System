@@ -324,6 +324,7 @@ export type WorkInsight = { auditRecordId: string | null; workTaskId: string; we
   ceoDecidedAt: string | null; ceoRemarks: string | null;
   reworkRequestedByRole: string | null; reworkReason: string | null; reworkRequestedAt: string | null;
   teamLeadReworkGuidance: string | null; teamLeadRespondedAt: string | null; reworkCycle: number };
+export type WorkTaskWorkflowState = { workTaskId: string; auditStatus: WorkInsight["auditStatus"] };
 export type HrLifecycleAccount = { userId: string; fullName: string; email: string; status: string; enabled: boolean };
 export type MonthlyRecords = { period: string; generatedAt: string; visitorCount: number; employeeCount: number;
   joinedEmployees: number; relievedEmployees: number; pendingLeaveRequests: number;
@@ -1689,6 +1690,11 @@ export const brainServeApi = {
       method: "POST", body: JSON.stringify({ note }),
     });
   },
+  reviseEmployeeWorkTaskRework(id: string, update: string) {
+    return apiRequest<WorkTask>(`/work-tasks/${id}/revise-rework`, {
+      method: "POST", body: JSON.stringify({ note: update }),
+    });
+  },
   acknowledgeWorkTask(id: string) {
     return apiRequest<WorkTask>(`/work-tasks/${id}/acknowledge`, { method: "POST" });
   },
@@ -1698,6 +1704,9 @@ export const brainServeApi = {
   },
   pendingHrWorkInsights() {
     return apiRequest<WorkInsight[]>("/work-insights/pending-hr-audit");
+  },
+  workTaskWorkflowStates() {
+    return apiRequest<WorkTaskWorkflowState[]>("/work-insights/task-workflow-states");
   },
   auditWorkInsight(taskId: string) {
     return apiRequest<WorkInsight>(`/work-insights/tasks/${taskId}/audit`, { method: "POST" });

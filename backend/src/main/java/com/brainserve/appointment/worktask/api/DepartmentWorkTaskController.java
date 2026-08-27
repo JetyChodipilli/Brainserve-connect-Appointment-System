@@ -64,6 +64,14 @@ public class DepartmentWorkTaskController {
         return TaskResponse.from(service.complete(userId(jwt), employeeId(jwt, false), id, request.note()));
     }
 
+    @PostMapping("/{id}/revise-rework")
+    @PreAuthorize("hasRole('EMPLOYEE') and hasAuthority('WORK_TASK_PROGRESS')")
+    TaskResponse reviseRework(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+                              @Valid @RequestBody RequiredUpdateRequest request) {
+        return TaskResponse.from(service.reviseEmployeeRework(
+                userId(jwt), employeeId(jwt, true), id, request.note()));
+    }
+
     @PostMapping("/{id}/approve")
     @PreAuthorize("hasRole('TEAM_LEAD') and hasAuthority('WORK_TASK_REVIEW')")
     TaskResponse approve(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,

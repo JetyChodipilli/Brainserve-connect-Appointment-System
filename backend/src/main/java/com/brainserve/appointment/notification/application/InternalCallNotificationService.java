@@ -160,6 +160,42 @@ public class InternalCallNotificationService implements InternalNotificationGate
     }
 
     @Override
+    public void notifyWorkerOfCeoWorkInsightApproval(
+            UUID ceoUserId,
+            UUID recipientUserId,
+            String message
+    ) {
+        var sender = staff.requireActive(ceoUserId);
+
+        if (!sender.roles().contains(CEO)) {
+            throw new BusinessException(
+                    "CEO_ROLE_REQUIRED",
+                    "Only CEO can publish final work-insight approval",
+                    HttpStatus.FORBIDDEN
+            );
+        }
+
+        var recipient = staff.requireActive(recipientUserId);
+
+        if (!recipient.roles().contains(EMPLOYEE)
+                && !recipient.roles().contains(TEAM_LEAD)) {
+            throw new BusinessException(
+                    "WORK_INSIGHT_FINAL_APPROVAL_ROUTE_DENIED",
+                    "Final work-insight approval can only notify the assigned Employee or Team Lead",
+                    HttpStatus.FORBIDDEN
+            );
+        }
+
+        persistAndPublish(
+                sender,
+                recipient,
+                message,
+                InternalCallNotification.MessagePriority.HIGH,
+                InternalCallNotification.MessageCategory.INSIGHT
+        );
+    }
+
+    @Override
     public void notifyManagerOfWorkInsightAudit(UUID hrUserId, UUID managerUserId, String message) {
         var sender = staff.requireActive(hrUserId);
         if (!sender.roles().contains(HR)) throw new BusinessException("HR_ROLE_REQUIRED",
@@ -648,43 +684,102 @@ public class InternalCallNotificationService implements InternalNotificationGate
     }
 
     private List<ClaimedInternalCall> claimReadyForDelivery() {
-        List<ClaimedInternalCall> claimed = transactions.execute(status -> {
-            Instant retryAt = Instant.now().plusSeconds(deliveryRetrySeconds);
-            List<InternalCallNotification> ready = notifications.lockReadyForDelivery(Set.of(
-                            InternalCallNotification.DeliveryStatus.FAILED,
-                            InternalCallNotification.DeliveryStatus.QUEUED),
-                    Instant.now(), PageRequest.of(0, 25));
-            ready.forEach(notification -> notification.beginDeliveryAttempt(retryAt));
-            notifications.flush();
-            return ready.stream().map(notification -> new ClaimedInternalCall(notification.getId(),
-                    notification.getSenderUserId(), notification.getRecipientUserId(), notification.getMessage(),
-                    notification.getSentAt(), retryAt)).toList();
-        });
+        List<ClaimedInternalCall> claimed =
+                transactions.execute(status -> {
+                    Instant retryAt = Instant.now()
+                            .plusSeconds(deliveryRetrySeconds);
+
+                    List<InternalCallNotification> ready =
+                            notifications.lockReadyForDelivery(
+                                    Set.of(
+                                            InternalCallNotification
+                                                    .DeliveryStatus.FAILED,
+                                            InternalCallNotification
+                                                    .DeliveryStatus.QUEUED
+                                    ),
+                                    Instant.now(),
+                                    PageRequest.of(0, 25)
+                            );
+
+                    ready.forEach(notification ->
+                            notification.beginDeliveryAttempt(retryAt)
+                    );
+
+                    notifications.flush();
+
+                    return ready.stream()
+                            .map(notification ->
+                                    new ClaimedInternalCall(
+                                            notification.getId(),
+                                            notification.getSenderUserId(),
+                                            notification.getRecipientUserId(),
+                                            notification.getMessage(),
+                                            notification.getSentAt(),
+                                            notification.getDeliveryAttempts(),
+                                            retryAt
+                                    )
+                            )
+                            .toList();
+                });
+
         return claimed == null ? List.of() : claimed;
     }
 
-    private void publishClaimed(ClaimedInternalCall notification) {
+    private void publishClaimed(
+            ClaimedInternalCall notification
+    ) {
         String failure = null;
+
         try {
-            kafka.send(topic, notification.recipientUserId().toString(), new InternalCallEvent(notification.id(),
-                    notification.senderUserId(), notification.recipientUserId(), notification.message(),
-                    notification.sentAt())).get(5, TimeUnit.SECONDS);
-        } catch (InterruptedException ex) {
+            kafka.send(
+                    topic,
+                    notification.recipientUserId().toString(),
+                    new InternalCallEvent(
+                            notification.id(),
+                            notification.senderUserId(),
+                            notification.recipientUserId(),
+                            notification.message(),
+                            notification.sentAt()
+                    )
+            ).get(5, TimeUnit.SECONDS);
+        } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             failure = "Kafka publish interrupted";
         } catch (Exception exception) {
             failure = exception.getClass().getSimpleName();
         }
+
         String deliveryFailure = failure;
-        transactions.executeWithoutResult(status -> notifications.findById(notification.id()).ifPresent(current -> {
-            // The Kafka consumer can acknowledge between publish and this completion transaction.
-            // Never move an already delivered message back to QUEUED.
-            if (current.getDeliveryStatus() == InternalCallNotification.DeliveryStatus.DELIVERED) return;
-            if (deliveryFailure == null) current.markPublished(Instant.now(), notification.retryAt());
-            else current.markFailed(deliveryFailure, notification.retryAt());
-        }));
+
+        transactions.executeWithoutResult(status -> {
+            Instant completedAt = Instant.now();
+
+            if (deliveryFailure == null) {
+                notifications.markPublishedIfUnacknowledged(
+                        notification.id(),
+                        notification.deliveryAttempt(),
+                        completedAt,
+                        notification.retryAt()
+                );
+            } else {
+                notifications.markFailedIfUnacknowledged(
+                        notification.id(),
+                        notification.deliveryAttempt(),
+                        deliveryFailure,
+                        notification.retryAt(),
+                        completedAt
+                );
+            }
+        });
     }
 
-    private record ClaimedInternalCall(UUID id, UUID senderUserId, UUID recipientUserId, String message,
-                                       Instant sentAt, Instant retryAt) {}
+    private record ClaimedInternalCall(
+            UUID id,
+            UUID senderUserId,
+            UUID recipientUserId,
+            String message,
+            Instant sentAt,
+            int deliveryAttempt,
+            Instant retryAt
+    ) {}
 }

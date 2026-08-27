@@ -10,7 +10,10 @@ import org.springframework.transaction.event.TransactionalEventListener;
 @Component
 public class WorkInsightNotificationListener {
     private final InternalNotificationGateway notifications;
-    public WorkInsightNotificationListener(InternalNotificationGateway notifications) {
+
+    public WorkInsightNotificationListener(
+            InternalNotificationGateway notifications
+    ) {
         this.notifications = notifications;
     }
 
@@ -18,35 +21,72 @@ public class WorkInsightNotificationListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void hrAudit(WorkInsightEvents.HrAuditSubmitted event) {
         notifications.notifyManagerOfWorkInsightAudit(
-                event.hrUserId(), event.managerUserId(), event.message());
+                event.hrUserId(),
+                event.managerUserId(),
+                event.message()
+        );
     }
 
     @Async("notificationExecutor")
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void managerDecision(WorkInsightEvents.ManagerDecisionRecorded event) {
+    public void managerDecision(
+            WorkInsightEvents.ManagerDecisionRecorded event
+    ) {
         notifications.notifyHrOfManagerWorkInsightDecision(
-                event.managerUserId(), event.hrUserId(), event.message());
+                event.managerUserId(),
+                event.hrUserId(),
+                event.message()
+        );
+
         if (event.approved()) {
             notifications.notifyCeoOfManagerWorkInsightApproval(
-                    event.managerUserId(), event.message());
+                    event.managerUserId(),
+                    event.message()
+            );
         }
     }
 
     @Async("notificationExecutor")
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void ceoDecision(WorkInsightEvents.CeoDecisionRecorded event) {
-        notifications.notifyHrOfWorkInsightDecision(event.ceoUserId(), event.hrUserId(), event.message());
+        notifications.notifyHrOfWorkInsightDecision(
+                event.ceoUserId(),
+                event.hrUserId(),
+                event.message()
+        );
     }
 
     @Async("notificationExecutor")
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void reworkRequested(WorkInsightEvents.ReworkRequested event) {
-        notifications.notifyTeamLeadOfWorkInsightRework(event.reviewerUserId(), event.teamLeadUserId(), event.message());
+    public void finalApproval(
+            WorkInsightEvents.FinalApprovalRecipient event
+    ) {
+        notifications.notifyWorkerOfCeoWorkInsightApproval(
+                event.ceoUserId(),
+                event.recipientUserId(),
+                event.message()
+        );
+    }
+
+    @Async("notificationExecutor")
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void reworkRequested(
+            WorkInsightEvents.ReworkRequested event
+    ) {
+        notifications.notifyTeamLeadOfWorkInsightRework(
+                event.reviewerUserId(),
+                event.teamLeadUserId(),
+                event.message()
+        );
     }
 
     @Async("notificationExecutor")
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void reworkAssigned(WorkInsightEvents.ReworkAssigned event) {
-        notifications.sendWorkTaskUpdate(event.teamLeadUserId(), event.employeeUserId(), event.message());
+        notifications.sendWorkTaskUpdate(
+                event.teamLeadUserId(),
+                event.employeeUserId(),
+                event.message()
+        );
     }
 }

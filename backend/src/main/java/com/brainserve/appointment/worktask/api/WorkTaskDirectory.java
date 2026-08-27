@@ -31,6 +31,8 @@ public interface WorkTaskDirectory {
             String update
     );
 
+    TaskSnapshot finalizeInsightApproval(UUID workTaskId);
+
     record TaskSnapshot(
             UUID id,
             Instant createdAt,

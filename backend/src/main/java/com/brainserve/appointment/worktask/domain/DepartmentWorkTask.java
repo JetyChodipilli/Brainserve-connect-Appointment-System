@@ -103,6 +103,7 @@ public class DepartmentWorkTask extends AuditableEntity {
         if (status != WorkTaskStatus.COMPLETED) invalid("returned for changes");
         status = WorkTaskStatus.CHANGES_REQUESTED;
         teamLeadReview = required(review, "A review note is required when requesting changes");
+        completedAt = null;
         approvedAt = null;
         acknowledgedAt = null;
     }
@@ -153,6 +154,31 @@ public class DepartmentWorkTask extends AuditableEntity {
         }
         employeeUpdate = required(update, "A revised completion update is required");
         completedAt = Instant.now();
+    }
+
+    public void reviseEmployeeReworkSubmission(String update) {
+        if (!"EMPLOYEE".equals(assigneeRole)) {
+            throw new BusinessException("WORK_TASK_REWORK_UPDATE_DENIED",
+                    "Only the assigned Employee can update this rework submission",
+                    HttpStatus.FORBIDDEN);
+        }
+        if (status != WorkTaskStatus.COMPLETED || teamLeadReview == null) {
+            throw new BusinessException("WORK_TASK_REWORK_UPDATE_CLOSED",
+                    "This rework submission can no longer be updated because the Team Lead has already reviewed it",
+                    HttpStatus.CONFLICT);
+        }
+        employeeUpdate = required(update, "A revised completion update is required");
+        completedAt = Instant.now();
+    }
+
+    public void finalizeInsightApproval() {
+        if (!"TEAM_LEAD".equals(assigneeRole)) return;
+        if (status != WorkTaskStatus.COMPLETED) {
+            invalid("finally approved by Insights");
+        }
+        status = WorkTaskStatus.APPROVED;
+        approvedAt = Instant.now();
+        acknowledgedAt = null;
     }
 
     public boolean isOverdue(LocalDate today) {

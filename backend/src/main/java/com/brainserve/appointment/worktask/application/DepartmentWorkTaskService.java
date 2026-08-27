@@ -268,6 +268,15 @@ public class DepartmentWorkTaskService implements WorkTaskDirectory {
         return snapshot(task);
     }
 
+    @Override
+    @Transactional
+    public TaskSnapshot finalizeInsightApproval(UUID workTaskId) {
+        DepartmentWorkTask task = require(workTaskId);
+        task.finalizeInsightApproval();
+        audit(task, "GOVERNANCE_APPROVED");
+        return snapshot(task);
+    }
+
     @Transactional
     public DepartmentWorkTask start(UUID userId, UUID employeeId, UUID taskId, String update) {
         DepartmentWorkTask task = requireProgressScope(userId, employeeId, taskId);
@@ -289,6 +298,19 @@ public class DepartmentWorkTaskService implements WorkTaskDirectory {
             notifyProgress(userId, task, "marked completed and is waiting for Team Lead approval", update);
         }
         audit(task, "COMPLETED");
+        return task;
+    }
+
+    @Transactional
+    public DepartmentWorkTask reviseEmployeeRework(UUID employeeUserId, UUID employeeId,
+                                                   UUID taskId, String update) {
+        DepartmentWorkTask task = requireEmployeeScope(employeeId, taskId);
+        task.reviseEmployeeReworkSubmission(update);
+        events.publishEvent(new WorkTaskEvents.DirectNotificationRequested(employeeUserId,
+                task.getTeamLeadUserId(),
+                "Employee updated and resubmitted rework for worksheet ‘" + task.getTitle()
+                        + "’. Review the corrected delivery in Work Board."));
+        audit(task, "REWORK_RESUBMITTED");
         return task;
     }
 

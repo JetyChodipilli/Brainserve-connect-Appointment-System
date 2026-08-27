@@ -53,8 +53,7 @@ test("notification delivery does not hold database transactions during network c
   assert.match(emailDispatcher, /private void complete\(UUID messageId, String failure\)/);
   assert.doesNotMatch(emailDispatcher, /@Transactional\s+public void dispatch\(\)/);
   assert.match(service, /private List<ClaimedInternalCall> claimReadyForDelivery\(\)/);
-  assert.match(service, /private void publishClaimed\(ClaimedInternalCall notification\)/);
-  assert.doesNotMatch(service, /@Transactional\s+public void dispatchPending\(\)/);
+  assert.match(service, /private\s+void\s+publishClaimed\s*\(\s*ClaimedInternalCall\s+notification\s*\)/,);assert.doesNotMatch(service, /@Transactional\s+public void dispatchPending\(\)/);
 });
 
 test("notification workers recover stale claims and scheduled jobs use a bounded pool", () => {

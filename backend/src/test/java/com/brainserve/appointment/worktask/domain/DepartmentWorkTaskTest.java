@@ -41,8 +41,27 @@ class DepartmentWorkTaskTest {
         task.requestChanges("Add the missing HR routing test");
 
         assertThat(task.getStatus()).isEqualTo(WorkTaskStatus.CHANGES_REQUESTED);
+        assertThat(task.getCompletedAt()).isNull();
         task.start("Adding the HR test");
         assertThat(task.getStatus()).isEqualTo(WorkTaskStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void employeeCanReviseRejectedWorkUntilTeamLeadReviewsIt() {
+        DepartmentWorkTask task = task();
+        task.complete("Initial delivery");
+        task.requestChanges("Add the missing HR routing test");
+        task.complete("Corrected delivery");
+
+        task.reviseEmployeeReworkSubmission("Corrected delivery with final evidence");
+
+        assertThat(task.getStatus()).isEqualTo(WorkTaskStatus.COMPLETED);
+        assertThat(task.getEmployeeUpdate()).isEqualTo("Corrected delivery with final evidence");
+
+        task.approve("Rework accepted");
+        assertThatThrownBy(() -> task.reviseEmployeeReworkSubmission("Late edit"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("already reviewed");
     }
 
     @Test
@@ -70,6 +89,23 @@ class DepartmentWorkTaskTest {
         task.complete("Failure-path evidence attached");
         task.approve("Rework verified");
         assertThat(task.getStatus()).isEqualTo(WorkTaskStatus.APPROVED);
+    }
+
+    @Test
+    void employeeCanUpdateInsightsReworkReturnedByEveryGovernanceReviewer() {
+        for (String reviewer : new String[] {"HR", "MANAGER", "CEO"}) {
+            DepartmentWorkTask task = task();
+            task.complete("Initial delivery");
+            task.approve("Team Lead verified");
+            task.requestInsightRework(reviewer, reviewer + " requested stronger evidence");
+            task.assignInsightRework("Correct the evidence requested by " + reviewer);
+            task.complete("Corrected evidence submitted");
+
+            task.reviseEmployeeReworkSubmission("Final corrected evidence for " + reviewer);
+
+            assertThat(task.getStatus()).isEqualTo(WorkTaskStatus.COMPLETED);
+            assertThat(task.getEmployeeUpdate()).isEqualTo("Final corrected evidence for " + reviewer);
+        }
     }
 
     @Test
@@ -126,6 +162,54 @@ class DepartmentWorkTaskTest {
         assertThat(task.getStatus()).isEqualTo(WorkTaskStatus.COMPLETED);
         assertThat(task.getEmployeeUpdate())
                 .isEqualTo("Corrected rework submission with exception evidence");
+    }
+
+    @Test
+    void hrAssignedTeamLeadCanCompleteReworkReturnedByEveryGovernanceReviewer() {
+        for (String reviewer : new String[] {"HR", "MANAGER", "CEO"}) {
+            UUID teamLeadUserId = UUID.randomUUID();
+            DepartmentWorkTask task = new DepartmentWorkTask(UUID.randomUUID(), UUID.randomUUID(),
+                    teamLeadUserId, UUID.randomUUID(), "HR_ADMIN", "TEAM_LEAD",
+                    "Prepare weekly delivery evidence", "Attach the completed department evidence",
+                    "Operations", LocalDate.now().plusDays(2));
+            task.complete("Initial evidence");
+            task.requestInsightRework(reviewer, reviewer + " requested stronger evidence");
+            task.assignInsightRework("Correct the evidence requested by " + reviewer);
+
+            task.complete("Final corrected evidence for " + reviewer);
+
+            assertThat(task.getStatus()).isEqualTo(WorkTaskStatus.COMPLETED);
+            assertThat(task.isReadyForHrAudit()).isTrue();
+        }
+    }
+
+    @Test
+    void ceoFinalApprovalClosesHrAssignedTeamLeadWorksheet() {
+        UUID teamLeadUserId = UUID.randomUUID();
+        DepartmentWorkTask task = new DepartmentWorkTask(UUID.randomUUID(), UUID.randomUUID(),
+                teamLeadUserId, UUID.randomUUID(), "HR_ADMIN", "TEAM_LEAD",
+                "Prepare weekly delivery evidence", "Attach the completed department evidence",
+                "Operations", LocalDate.now().plusDays(2));
+        task.complete("Final evidence submitted");
+
+        task.finalizeInsightApproval();
+
+        assertThat(task.getStatus()).isEqualTo(WorkTaskStatus.APPROVED);
+        assertThat(task.getApprovedAt()).isNotNull();
+        assertThat(task.isReadyForHrAudit()).isFalse();
+    }
+
+    @Test
+    void ceoFinalApprovalDoesNotRewriteEmployeeApprovalState() {
+        DepartmentWorkTask task = task();
+        task.complete("Final evidence submitted");
+        task.approve("Team Lead accepted the delivery");
+        var approvedAt = task.getApprovedAt();
+
+        task.finalizeInsightApproval();
+
+        assertThat(task.getStatus()).isEqualTo(WorkTaskStatus.APPROVED);
+        assertThat(task.getApprovedAt()).isEqualTo(approvedAt);
     }
 
     @Test

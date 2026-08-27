@@ -5322,6 +5322,7 @@ function WorkBoard({ role, refreshKey, userEmail, employees, staffAccounts, depa
     const [workspace, setWorkspace] = useState<WorkTaskWorkspace | null>(null);
     const [scopeDepartments, setScopeDepartments] = useState<Department[]>(departments);
     const [pendingHrAuditTaskIds, setPendingHrAuditTaskIds] = useState<Set<string>>(new Set());
+    const [workflowStateByTaskId, setWorkflowStateByTaskId] = useState<Map<string, WorkInsight["auditStatus"]>>(new Map());
     const [actionDialog, setActionDialog] = useState<{ task: WorkTask; action: "start" | "complete" | "approve" | "request-changes" | "insight-rework" | "revise-rework" | "hr-rework" } | null>(null);
     const [actionNote, setActionNote] = useState("");
     const loadInFlightRef = useRef(false);
@@ -5395,6 +5396,7 @@ function WorkBoard({ role, refreshKey, userEmail, employees, staffAccounts, depa
         try {
             if (role === "Employee" && !currentEmployeeId) {
                 setTasks([]);
+                setWorkflowStateByTaskId(new Map());
                 setLoadError("Your Employee login is not linked to a saved employee profile. Ask HR to complete your department assignment.");
                 hasLoadedTasksRef.current = true;
                 return;
@@ -5412,6 +5414,9 @@ function WorkBoard({ role, refreshKey, userEmail, employees, staffAccounts, depa
                         return ready && (!existing || existing.auditStatus === "REWORK_ASSIGNED");
                     }).map((task) => task.id)));
                 }
+                setWorkflowStateByTaskId((["Employee", "Team Lead"] as Role[]).includes(role)
+                    ? new Map(readDemoWorkInsights().map((item) => [item.workTaskId, item.auditStatus]))
+                    : new Map());
                 setWorkspace(null);
                 setRefreshWarning("");
             } else {
@@ -5420,10 +5425,12 @@ function WorkBoard({ role, refreshKey, userEmail, employees, staffAccounts, depa
                     (["HR Admin", "Team Lead"] as Role[]).includes(role)
                         ? brainServeApi.workTaskWorkspace() : Promise.resolve(null),
                 ] as const);
-                const [auditResult, scopeResult] = await Promise.allSettled([
+                const [auditResult, scopeResult, workflowStateResult] = await Promise.allSettled([
                     role === "HR Admin" ? brainServeApi.pendingHrWorkInsights() : Promise.resolve([]),
                     (["Manager", "Employee"] as Role[]).includes(role)
                         ? brainServeApi.visibleDepartments() : Promise.resolve([] as Department[]),
+                    (["Employee", "Team Lead"] as Role[]).includes(role)
+                        ? brainServeApi.workTaskWorkflowStates() : Promise.resolve([]),
                 ] as const);
                 const warnings: string[] = [];
 
@@ -5450,6 +5457,16 @@ function WorkBoard({ role, refreshKey, userEmail, employees, staffAccounts, depa
                         setPendingHrAuditTaskIds(new Set(auditResult.value.map((item) => item.workTaskId)));
                     } else warnings.push("The HR audit queue could not be refreshed.");
                 }
+
+                if ((["Employee", "Team Lead"] as Role[]).includes(role)) {
+                    if (workflowStateResult.status === "fulfilled") {
+                        setWorkflowStateByTaskId(new Map(workflowStateResult.value
+                            .map((item) => [item.workTaskId, item.auditStatus])));
+                    } else {
+                        setWorkflowStateByTaskId(new Map());
+                        warnings.push("Approval and rework stages could not be refreshed, so submitted evidence is locked for safety.");
+                    }
+                } else setWorkflowStateByTaskId(new Map());
 
                 if (taskResult.status === "rejected") {
                     const detail = taskResult.reason instanceof Error
@@ -5510,7 +5527,10 @@ function WorkBoard({ role, refreshKey, userEmail, employees, staffAccounts, depa
     useEffect(() => {
         if (lastWorkspaceRefreshKeyRef.current === refreshKey) return;
         lastWorkspaceRefreshKeyRef.current = refreshKey;
-        if (document.visibilityState === "visible") void load("background");
+        const refresh = window.setTimeout(() => {
+            if (document.visibilityState === "visible") void load("background");
+        }, 0);
+        return () => window.clearTimeout(refresh);
     }, [load, refreshKey]);
 
     const saveDemo = (updated: WorkTask) => {
@@ -5647,22 +5667,39 @@ function WorkBoard({ role, refreshKey, userEmail, employees, staffAccounts, depa
         finally { setBusy(""); }
     };
 
-    const reviseInsightRework = async (task: WorkTask, update: string) => {
+    const reviseReworkSubmission = async (task: WorkTask, update: string) => {
         if (!update.trim()) { setError("Describe the corrected delivery before resubmitting it."); return false; }
         setBusy(`${task.id}:revise-rework`); setError(""); setMessage("");
         try {
             if (isBackendConfigured) {
-                await brainServeApi.reviseWorkInsightRework(task.id, update.trim());
-                await load();
+                if (task.assigneeRole === "EMPLOYEE") {
+                    const updated = await brainServeApi.reviseEmployeeWorkTaskRework(task.id, update.trim());
+                    setTasks((items) => items.map((item) => item.id === updated.id ? updated : item));
+                } else {
+                    await brainServeApi.reviseWorkInsightRework(task.id, update.trim());
+                    await load();
+                }
             } else {
                 const now = new Date().toISOString();
                 saveDemo({ ...task, employeeUpdate: update.trim(), completedAt: now,
                     version: task.version + 1 });
             }
-            setMessage("Rework submission updated. HR can now re-audit the corrected worksheet.");
+            setMessage(task.assigneeRole === "EMPLOYEE"
+                ? "Rework submission updated. Your Team Lead can now review the corrected worksheet."
+                : "Rework submission updated. HR can now re-audit the corrected worksheet.");
             return true;
         } catch (reason) {
-            setError(reason instanceof Error ? reason.message : "The rework submission could not be updated.");
+            const detail = reason instanceof Error ? reason.message : "The rework submission could not be updated.";
+            if (detail.includes("can no longer be updated")) {
+                setActionDialog(null);
+                setActionNote("");
+                setMessage(task.assigneeRole === "EMPLOYEE"
+                    ? "Your Team Lead has already reviewed this worksheet. The submitted evidence is locked and approval review is continuing."
+                    : "HR has already re-audited this worksheet. The submitted evidence is locked and approval review is continuing.");
+                void load("background");
+                return false;
+            }
+            setError(detail);
             return false;
         } finally { setBusy(""); }
     };
@@ -5726,19 +5763,45 @@ function WorkBoard({ role, refreshKey, userEmail, employees, staffAccounts, depa
         if (!actionDialog) return;
         const { task, action } = actionDialog;
         const succeeded = action === "insight-rework" ? await assignInsightRework(task, actionNote)
-            : action === "revise-rework" ? await reviseInsightRework(task, actionNote)
+            : action === "revise-rework" ? await reviseReworkSubmission(task, actionNote)
                 : action === "hr-rework" ? await requestHrTaskRework(task, actionNote)
                     : await act(task, action, actionNote);
         if (succeeded) { setActionDialog(null); setActionNote(""); }
     };
 
+    const isTeamLeadRequestedRework = (task: WorkTask) => task.assigneeRole === "EMPLOYEE"
+        && Boolean(task.teamLeadReview)
+        && (["CHANGES_REQUESTED", "IN_PROGRESS", "COMPLETED"] as WorkTask["status"][]).includes(task.status);
+    const isInsightsReworkCycle = (task: WorkTask) => Boolean(task.insightReviewReason)
+        && (task.reworkCycle ?? 0) > 0;
+    const isReworkCycle = (task: WorkTask) => isTeamLeadRequestedRework(task) || isInsightsReworkCycle(task);
+    const reworkFeedback = (task: WorkTask) => task.insightReviewReason
+        ?? (isTeamLeadRequestedRework(task) ? task.teamLeadReview : null);
+    const reworkSourceName = (task: WorkTask) => task.insightReviewSource === "CEO" ? "CEO"
+        : task.insightReviewSource === "MANAGER" ? "Manager"
+            : task.insightReviewReason ? "HR" : "Team Lead";
+    const reworkSourceLabel = (task: WorkTask) => `${reworkSourceName(task).toUpperCase()} FEEDBACK`;
+    const completingRework = actionDialog?.action === "complete"
+        && isReworkCycle(actionDialog.task);
     const taskActionCopy = actionDialog ? {
-        start: ["Start this worksheet", actionDialog.task.assigneeRole === "TEAM_LEAD" ? "Add a concise progress note for HR visibility." : "Add a concise progress note so your Team Lead knows how work began.", "Starting note", "Describe the first step or current focus", "Start work"],
-        complete: ["Submit completed work", actionDialog.task.assigneeRole === "TEAM_LEAD" ? "Summarize the result and evidence HR should audit." : "Summarize the result and evidence your Team Lead should review.", "Completion update", "What was completed, tested or delivered?", "Submit for review"],
+        start: isReworkCycle(actionDialog.task)
+            ? ["Start the required rework", "Record how you are addressing the reviewer feedback before submitting corrected evidence.", "Rework starting note", "Describe the correction now in progress", "Start rework"]
+            : ["Start this worksheet", actionDialog.task.assigneeRole === "TEAM_LEAD" ? "Add a concise progress note for HR visibility." : "Add a concise progress note so your Team Lead knows how work began.", "Starting note", "Describe the first step or current focus", "Start work"],
+        complete: completingRework
+            ? ["Submit corrected rework", actionDialog.task.assigneeRole === "TEAM_LEAD"
+                ? "This completion update is the corrected submission HR will re-audit. Include the final evidence now."
+                : "This completion update is the corrected submission your Team Lead will review. Include the final evidence now.",
+                "Corrected completion update", "Describe what was corrected, tested or delivered",
+                actionDialog.task.assigneeRole === "TEAM_LEAD" ? "Submit for HR re-audit" : "Submit for Team Lead review"]
+            : ["Submit completed work", actionDialog.task.assigneeRole === "TEAM_LEAD" ? "Summarize the result and evidence HR should audit." : "Summarize the result and evidence your Team Lead should review.", "Completion update", "What was completed, tested or delivered?", "Submit for review"],
         approve: ["Approve employee delivery", "Record the Team Lead decision before the worksheet enters HR Insights.", "Approval note", "Optional verification or quality note", "Approve worksheet"],
         "request-changes": ["Return for employee changes", "Explain exactly what the employee must correct before resubmitting.", "Required changes", "List the flaws and acceptance criteria", "Send changes"],
-        "insight-rework": ["Create an Insights rework plan", "Translate the HR, Manager or CEO feedback into clear corrective work.", "Rework guidance", "Explain the flaws, correction and expected evidence", "Assign rework"],
-        "revise-rework": ["Update the rework submission", "Correct the completed delivery note while this rework cycle is still waiting for HR re-audit.", "Corrected completion update", "Describe what was corrected, tested or delivered", "Update & resubmit"],
+        "insight-rework": actionDialog.task.assigneeRole === "TEAM_LEAD"
+            ? ["Start your Insights rework", "Turn the HR, Manager or CEO feedback into a corrective plan before updating the worksheet.", "Corrective plan", "Explain the correction and expected evidence", "Begin rework"]
+            : ["Create an Insights rework plan", "Translate the HR, Manager or CEO feedback into clear corrective work for the assigned Employee.", "Rework guidance", "Explain the flaws, correction and expected evidence", "Assign rework"],
+        "revise-rework": ["Update the rework submission", actionDialog.task.assigneeRole === "TEAM_LEAD"
+            ? "Correct the completed delivery note while this rework cycle is still waiting for HR re-audit."
+            : "Correct the completed delivery note while it is still waiting for Team Lead re-review.", "Corrected completion update", "Describe what was corrected, tested or delivered", "Update & resubmit"],
         "hr-rework": ["Return worksheet for rework", "Record the flaws the Team Lead must turn into a corrective plan.", "HR audit findings", "Explain the issue, required correction and acceptance evidence", "Return to Team Lead"],
     }[actionDialog.action] : null;
 
@@ -5746,6 +5809,10 @@ function WorkBoard({ role, refreshKey, userEmail, employees, staffAccounts, depa
     const isTodayTask = (task: WorkTask) => officeDateFromInstant(task.createdAt) === today;
     const isOpenCarryForwardTask = (task: WorkTask) => {
         if (isTodayTask(task)) return false;
+        const workflowState = workflowStateByTaskId.get(task.id);
+        if (workflowState === "CEO_APPROVED") {
+            return role === "Employee" && task.status === "APPROVED";
+        }
         if (role === "HR Admin" && pendingHrAuditTaskIds.has(task.id)) return true;
         if (role === "Employee" && task.status === "APPROVED") return true;
         return (["ASSIGNED", "IN_PROGRESS", "COMPLETED", "CHANGES_REQUESTED", "INSIGHT_REWORK_REQUESTED"] as WorkTask["status"][])
@@ -5766,6 +5833,32 @@ function WorkBoard({ role, refreshKey, userEmail, employees, staffAccounts, depa
     const pendingHrAuditCount = queueTasks.filter((item) => pendingHrAuditTaskIds.has(item.id)).length;
     const canProgress = (task: WorkTask) => role === "Employee" && task.assigneeRole === "EMPLOYEE"
         || role === "Team Lead" && task.assigneeRole === "TEAM_LEAD";
+    const canReviseRework = (task: WorkTask) => (role === "Team Lead"
+            && task.assigneeRole === "TEAM_LEAD"
+            && task.status === "COMPLETED"
+            && isInsightsReworkCycle(task)
+            && workflowStateByTaskId.get(task.id) === "REWORK_ASSIGNED")
+        || (role === "Employee"
+            && task.assigneeRole === "EMPLOYEE"
+            && task.status === "COMPLETED"
+            && isReworkCycle(task));
+    const taskStageLabel = (task: WorkTask) => {
+        const workflowState = workflowStateByTaskId.get(task.id);
+        if (workflowState === "CEO_APPROVED") return "Completed";
+        if (workflowState === "PENDING_CEO_APPROVAL") return "Awaiting CEO approval";
+        if (workflowState === "PENDING_MANAGER_APPROVAL") return "Awaiting Manager review";
+        if (["HR_REWORK_REQUESTED", "MANAGER_REWORK_REQUESTED", "CEO_REWORK_REQUESTED"].includes(workflowState ?? "")) {
+            return "Awaiting Team Lead rework plan";
+        }
+        if (workflowState === "REWORK_ASSIGNED") {
+            if (task.assigneeRole === "TEAM_LEAD" && task.status === "COMPLETED") return "Awaiting HR re-audit";
+            if (task.assigneeRole === "EMPLOYEE" && task.status === "COMPLETED") return "Awaiting Team Lead re-review";
+            if (task.assigneeRole === "EMPLOYEE" && ["APPROVED", "ACKNOWLEDGED"].includes(task.status)) return "Awaiting HR re-audit";
+            return "Rework in progress";
+        }
+        if (task.status === "COMPLETED" && isTeamLeadRequestedRework(task)) return "Awaiting Team Lead re-review";
+        return workTaskStatusLabel(task.status);
+    };
 
     return <section className="work-board-page">
         <PageTitle eyebrow="DEPARTMENT TASK SHEETS" title={role === "HR Admin" ? "Department work board" : role === "Team Lead" ? "Team task sheets" : role === "Manager" ? "Department work oversight" : "My task sheets"}
@@ -5809,8 +5902,8 @@ function WorkBoard({ role, refreshKey, userEmail, employees, staffAccounts, depa
             {filtered.map((task) => {
                 const expanded = expandedTaskId === task.id;
                 const detailsId = `work-task-${task.id}-details`;
-                const stageLabel = task.status === "COMPLETED" && (task.reworkCycle ?? 0) > 0
-                    ? "Awaiting HR re-audit" : workTaskStatusLabel(task.status);
+                const stageLabel = taskStageLabel(task);
+                const feedback = reworkFeedback(task);
                 return <article className={`task-sheet-card glass-panel${expanded ? " is-expanded" : ""}`} key={task.id}
                                 aria-labelledby={`work-task-${task.id}-title`}>
                     <header><div><span className="task-sheet-label"><FileText size={14} /> TASK SHEET</span><small>#{task.id.slice(-8).toUpperCase()}</small></div><WorkTaskPill status={task.status} label={stageLabel} /></header>
@@ -5824,22 +5917,22 @@ function WorkBoard({ role, refreshKey, userEmail, employees, staffAccounts, depa
                             <span><CircleUserRound size={15} aria-hidden="true" /><small>Assigned to</small><strong>{role === "Employee" ? "You" : employeeName(task.employeeId)}</strong></span>
                             <span><CalendarDays size={15} aria-hidden="true" /><small>Due</small><strong>{new Date(`${task.dueDate}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</strong></span>
                         </div>
-                        <div className="task-sheet-summary-alert-slot">{task.insightReviewReason && <span className="task-sheet-rework-flag"><RotateCcw size={14} /> Rework feedback · cycle {task.reworkCycle ?? 1}</span>}</div>
+                        <div className="task-sheet-summary-alert-slot">{feedback && <span className="task-sheet-rework-flag"><RotateCcw size={14} /> Rework feedback{isInsightsReworkCycle(task) ? ` · cycle ${Math.max(1, task.reworkCycle ?? 0)}` : ""}</span>}</div>
                     </div>
                     <section className="task-sheet-details" id={detailsId} aria-label="Worksheet details" hidden={!expanded}>
                         <section className="task-sheet-brief" aria-label="Full work instructions"><span>FULL INSTRUCTIONS</span><p>{task.description}</p></section>
                         <div className="task-sheet-fields"><div><span>Assigned to</span><strong>{role === "Employee" ? "Assigned to you" : employeeName(task.employeeId)} · {task.assigneeRole === "TEAM_LEAD" ? "Team Lead" : "Employee"}</strong></div><div><span>Assigned by</span><strong>{task.assignedByRole === "HR_ADMIN" ? "HR Admin" : "Team Lead"}</strong></div><div><span>Due date</span><strong>{new Date(`${task.dueDate}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</strong></div><div><span>Current stage</span><strong>{stageLabel}</strong></div></div>
                         <div className="task-flow" aria-label={`Worksheet stage: ${workTaskStatusLabel(task.status)}`}><span className="done"><i>1</i>Assigned</span><b /><span className={["IN_PROGRESS", "COMPLETED", "APPROVED", "ACKNOWLEDGED", "CHANGES_REQUESTED"].includes(task.status) ? "done" : task.status === "ASSIGNED" ? "current" : ""}><i>2</i>{task.assigneeRole === "TEAM_LEAD" ? "Team Lead work" : "Employee work"}</span><b />{task.assigneeRole === "EMPLOYEE" && <><span className={["APPROVED", "ACKNOWLEDGED"].includes(task.status) ? "done" : task.status === "COMPLETED" ? "current" : ""}><i>3</i>Team Lead review</span><b /></>}<span className={task.status === "INSIGHT_REWORK_REQUESTED" ? "returned" : (task.assigneeRole === "TEAM_LEAD" && task.status === "COMPLETED") || ["APPROVED", "ACKNOWLEDGED"].includes(task.status) ? "current" : ""}><i>{task.assigneeRole === "TEAM_LEAD" ? 3 : 4}</i>HR → Manager → CEO</span></div>
-                        {task.insightReviewReason && <div className="insight-rework-card"><span><RotateCcw size={15} /> INSIGHTS REWORK · CYCLE {task.reworkCycle ?? 1}</span><strong>{task.insightReviewSource === "CEO" ? "CEO feedback" : task.insightReviewSource === "MANAGER" ? "Manager feedback" : "HR feedback"}</strong><p>{task.insightReviewReason}</p>{task.status === "INSIGHT_REWORK_REQUESTED" && <small>Waiting for the Team Lead to record a corrective plan.</small>}</div>}
+                        {feedback && <div className="insight-rework-card"><span><RotateCcw size={15} /> {isInsightsReworkCycle(task) ? `INSIGHTS REWORK · CYCLE ${Math.max(1, task.reworkCycle ?? 0)}` : "TEAM LEAD REWORK"}</span><strong>{reworkSourceName(task)} feedback</strong><p>{feedback}</p>{task.status === "INSIGHT_REWORK_REQUESTED" && <small>Waiting for the Team Lead to record a corrective plan.</small>}</div>}
                         {(task.employeeUpdate || task.teamLeadReview) && <div className="task-sheet-responses">{task.employeeUpdate && <div><span>{task.assigneeRole === "TEAM_LEAD" ? "Team Lead work update" : "Employee work update"}</span><p>{task.employeeUpdate}</p></div>}{task.teamLeadReview && <div><span>Team Lead decision</span><p>{task.teamLeadReview}</p></div>}</div>}
                     </section>
                     <footer className="work-task-actions">
                         {expanded && <>
-                            {canProgress(task) && ["ASSIGNED", "CHANGES_REQUESTED"].includes(task.status) && <button className="button button-secondary" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "start")}><Clock3 size={14} /> Start</button>}
-                            {canProgress(task) && ["ASSIGNED", "IN_PROGRESS", "CHANGES_REQUESTED"].includes(task.status) && <button className="button button-primary" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "complete")}><CheckCircle2 size={14} /> Complete</button>}
+                            {canProgress(task) && ["ASSIGNED", "CHANGES_REQUESTED"].includes(task.status) && <button className="button button-secondary" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "start")}><Clock3 size={14} /> {isReworkCycle(task) ? "Start rework" : "Start"}</button>}
+                            {canProgress(task) && ["ASSIGNED", "IN_PROGRESS", "CHANGES_REQUESTED"].includes(task.status) && <button className="button button-primary" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "complete")}><CheckCircle2 size={14} /> {isReworkCycle(task) ? "Submit corrected work" : "Complete"}</button>}
                             {role === "Team Lead" && task.assigneeRole === "EMPLOYEE" && task.status === "COMPLETED" && <><button className="button button-reject" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "request-changes")}><X size={14} /> Request changes</button><button className="button button-approve" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "approve")}><BadgeCheck size={14} /> Approve delivery</button></>}
-                            {role === "Team Lead" && task.status === "INSIGHT_REWORK_REQUESTED" && <button className="button button-primary" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "insight-rework")}><RotateCcw size={14} /> Create rework plan</button>}
-                            {role === "Team Lead" && task.assigneeRole === "TEAM_LEAD" && task.status === "COMPLETED" && Boolean(task.insightReviewReason) && (task.reworkCycle ?? 0) > 0 && <button className="button button-primary" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "revise-rework")}><RotateCcw size={14} /> Update & resubmit</button>}
+                            {role === "Team Lead" && task.status === "INSIGHT_REWORK_REQUESTED" && <button className="button button-primary" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "insight-rework")}><RotateCcw size={14} /> {task.assigneeRole === "TEAM_LEAD" ? "Start rework" : "Create rework plan"}</button>}
+                            {canReviseRework(task) && <button className="button button-primary" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "revise-rework")}><RotateCcw size={14} /> Update & resubmit</button>}
                             {role === "Employee" && task.status === "APPROVED" && <button className="button button-approve" disabled={Boolean(busy)} onClick={() => void act(task, "acknowledge")}><BadgeCheck size={14} /> Acknowledge</button>}
                             {role === "HR Admin" && pendingHrAuditTaskIds.has(task.id) && <><button className="button button-reject" disabled={Boolean(busy)} onClick={() => openTaskAction(task, "hr-rework")}><RotateCcw size={14} /> Return for rework</button><button className="button button-approve" disabled={Boolean(busy)} onClick={() => void auditHrTask(task)}><ShieldCheck size={14} /> Audit & send to Manager</button></>}
                         </>}
@@ -5849,7 +5942,7 @@ function WorkBoard({ role, refreshKey, userEmail, employees, staffAccounts, depa
             })}{!loading && filtered.length === 0 && <div className="empty-state task-sheet-empty"><FileText size={29} /><strong>{loadError ? "Worksheet data is temporarily unavailable" : queueScope === "TODAY" ? "No worksheets on today’s board" : "No open carry-forward work"}</strong><small>{loadError ? "The last confirmed data will return automatically after the database connection recovers." : queueScope === "TODAY" ? "New worksheets created today will appear here. Use Open carry-forward for unfinished work from earlier days." : "All older worksheets are closed or no longer require action. Their stored records remain available for governance and audit."}</small></div>}
         </div>
         {role === "Team Lead" && <article className="panel glass-panel work-visitor-approvals"><div className="panel-heading"><div><span>VISITOR WORKFLOW</span><h2>Department visitor approvals</h2><p>Visitor approval remains available here so removing Appointments never breaks Security → Reception → HR routing.</p></div><b>{pendingVisitorApprovals.length}</b></div>{pendingVisitorApprovals.map((item) => <div className="approval-item" key={item.id}><div className="approval-person"><span className="avatar">{item.initials}</span><span><strong>{item.visitor}</strong><small>Visiting {item.host} · {item.referenceNumber}</small></span></div><p>“{item.arrivalPurpose ?? item.purpose}”</p><div className="approval-actions"><button className="button button-reject" onClick={() => void decideAppointment(item.id, "reject")}><X size={15} /> Reject visit</button><button className="button button-approve" onClick={() => void decideAppointment(item.id, "approve")}><Check size={15} /> Approve visit</button></div></div>)}{pendingVisitorApprovals.length === 0 && <div className="empty-state"><ShieldCheck size={27} /><strong>No visitor approvals waiting</strong><small>HR-routed department visitors will appear here.</small></div>}</article>}
-        {actionDialog && taskActionCopy && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setActionDialog(null); }}><section className="modal work-action-modal" role="dialog" aria-modal="true" aria-labelledby="work-action-title"><header><div><span>WORKSHEET ACTION</span><h2 id="work-action-title">{taskActionCopy[0]}</h2><p>{taskActionCopy[1]}</p></div><button className="icon-button" type="button" onClick={() => setActionDialog(null)} aria-label="Close worksheet action"><X size={18} /></button></header><form onSubmit={submitTaskAction}><div className="work-action-context"><span className="avatar">{visitorInitials(employeeName(actionDialog.task.employeeId))}</span><span><small>{actionDialog.task.departmentBranch} · {workTaskStatusLabel(actionDialog.task.status)}</small><strong>{actionDialog.task.title}</strong></span></div>{["insight-rework", "revise-rework"].includes(actionDialog.action) && <div className="modal-review-source"><RotateCcw size={16} /><span><small>{actionDialog.task.insightReviewSource === "CEO" ? "CEO FEEDBACK" : actionDialog.task.insightReviewSource === "MANAGER" ? "MANAGER FEEDBACK" : "HR FEEDBACK"}</small><strong>{actionDialog.task.insightReviewReason}</strong></span></div>}<label>{taskActionCopy[2]}<textarea value={actionNote} onChange={(event) => setActionNote(event.target.value)} placeholder={taskActionCopy[3]} minLength={["complete", "request-changes", "insight-rework", "revise-rework", "hr-rework"].includes(actionDialog.action) ? 5 : undefined} maxLength={1000} required={["complete", "request-changes", "insight-rework", "revise-rework", "hr-rework"].includes(actionDialog.action)} autoFocus /></label><small className="dialog-character-count">{actionNote.length}/1000</small>{error && <div className="login-error" role="alert">{error}</div>}<div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setActionDialog(null)}>Cancel</button><button className="button button-primary" disabled={Boolean(busy)}>{busy ? "Saving…" : taskActionCopy[4]}<ArrowRight size={15} /></button></div></form></section></div>}
+        {actionDialog && taskActionCopy && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setActionDialog(null); }}><section className="modal work-action-modal" role="dialog" aria-modal="true" aria-labelledby="work-action-title"><header><div><span>WORKSHEET ACTION</span><h2 id="work-action-title">{taskActionCopy[0]}</h2><p>{taskActionCopy[1]}</p></div><button className="icon-button" type="button" onClick={() => setActionDialog(null)} aria-label="Close worksheet action"><X size={18} /></button></header><form onSubmit={submitTaskAction}><div className="work-action-context"><span className="avatar">{visitorInitials(employeeName(actionDialog.task.employeeId))}</span><span><small>{actionDialog.task.departmentBranch} · {taskStageLabel(actionDialog.task)}</small><strong>{actionDialog.task.title}</strong></span></div>{["insight-rework", "revise-rework"].includes(actionDialog.action) && reworkFeedback(actionDialog.task) && <div className="modal-review-source"><RotateCcw size={16} /><span><small>{reworkSourceLabel(actionDialog.task)}</small><strong>{reworkFeedback(actionDialog.task)}</strong></span></div>}<label>{taskActionCopy[2]}<textarea value={actionNote} onChange={(event) => setActionNote(event.target.value)} placeholder={taskActionCopy[3]} minLength={["complete", "request-changes", "insight-rework", "revise-rework", "hr-rework"].includes(actionDialog.action) ? 5 : undefined} maxLength={1000} required={["complete", "request-changes", "insight-rework", "revise-rework", "hr-rework"].includes(actionDialog.action)} autoFocus /></label><small className="dialog-character-count">{actionNote.length}/1000</small>{error && <div className="login-error" role="alert">{error}</div>}<div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setActionDialog(null)}>Cancel</button><button className="button button-primary" disabled={Boolean(busy)}>{busy ? "Saving…" : taskActionCopy[4]}<ArrowRight size={15} /></button></div></form></section></div>}
         {message && <div className="success-banner"><CheckCircle2 size={17} />{message}</div>}{error && !actionDialog && <div className="login-error" role="alert">{error}</div>}
     </section>;
 }
@@ -6043,6 +6136,8 @@ function WorkInsightsView({ role, userEmail, departments, employees, staffAccoun
                     auditStatus: reviewer === "MANAGER"
                         ? approved ? "PENDING_CEO_APPROVAL" as const : "MANAGER_REWORK_REQUESTED" as const
                         : approved ? "CEO_APPROVED" as const : "CEO_REWORK_REQUESTED" as const,
+                    taskStatus: reviewer === "CEO" && approved && item.assigneeRole === "TEAM_LEAD"
+                        ? "APPROVED" as const : item.taskStatus,
                     managerDecidedAt: reviewer === "MANAGER" ? new Date().toISOString() : item.managerDecidedAt,
                     managerRemarks: reviewer === "MANAGER" ? remarks.trim() || null : item.managerRemarks,
                     ceoDecidedAt: reviewer === "CEO" ? new Date().toISOString() : item.ceoDecidedAt,
@@ -6064,8 +6159,16 @@ function WorkInsightsView({ role, userEmail, departments, employees, staffAccoun
                 const hr = accounts.find((account) => account.id === hrAssignment?.hrUserId
                     && account.status === "ACTIVE");
                 const ceo = accounts.find((account) => account.role === "ROLE_CEO" && account.status === "ACTIVE");
-                const recipients = [hr, reviewer === "MANAGER" && approved ? ceo : undefined]
-                    .filter((recipient): recipient is DemoProvisioningAccount => Boolean(recipient));
+                const assignee = item.assigneeRole === "TEAM_LEAD"
+                    ? accounts.find((account) => account.id === item.teamLeadUserId && account.status === "ACTIVE")
+                    : accounts.find((account) => account.employeeId === item.employeeId && account.status === "ACTIVE");
+                const teamLead = accounts.find((account) => account.id === item.teamLeadUserId
+                    && account.status === "ACTIVE");
+                const recipients = [hr, reviewer === "MANAGER" && approved ? ceo : undefined,
+                    reviewer === "CEO" && approved ? assignee : undefined,
+                    reviewer === "CEO" && approved && item.assigneeRole === "EMPLOYEE" ? teamLead : undefined]
+                    .filter((recipient): recipient is DemoProvisioningAccount => Boolean(recipient))
+                    .filter((recipient, index, values) => values.findIndex((value) => value.id === recipient.id) === index);
                 if (sender) {
                     const notices = recipients.filter((recipient) => recipient.id !== sender.id).map((recipient) => ({
                         id: newClientId(), senderUserId: sender.id, recipientUserId: recipient.id,
@@ -6093,6 +6196,12 @@ function WorkInsightsView({ role, userEmail, departments, employees, staffAccoun
                     message: `${reviewer === "MANAGER" ? "Manager" : "CEO"} returned “${item.taskTitle}” for rework. Flaws: ${remarks.trim()}`,
                     deliveryStatus: "DELIVERED", sentAt: now, deliveredAt: now, readAt: null,
                     senderEmail: sender.email, recipientEmail: recipient.email }, ...readDemoInternalNotifications()]);
+            }
+            if (!isBackendConfigured && reviewer === "CEO" && approved && item.assigneeRole === "TEAM_LEAD") {
+                const now = new Date().toISOString();
+                writeDemoWorkTasks(readDemoWorkTasks().map((task) => task.id === item.workTaskId
+                    ? { ...task, status: "APPROVED" as const, approvedAt: now, acknowledgedAt: null }
+                    : task));
             }
             setItems((values) => values.map((value) => value.auditRecordId === item.auditRecordId ? updated : value));
             setMessage(approved ? reviewer === "MANAGER"
