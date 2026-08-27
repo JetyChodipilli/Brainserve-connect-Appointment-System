@@ -25,6 +25,12 @@ public interface WorkTaskDirectory {
             String guidance
     );
 
+    TaskSnapshot reviseInsightReworkSubmission(
+            UUID teamLeadUserId,
+            UUID workTaskId,
+            String update
+    );
+
     record TaskSnapshot(
             UUID id,
             Instant createdAt,

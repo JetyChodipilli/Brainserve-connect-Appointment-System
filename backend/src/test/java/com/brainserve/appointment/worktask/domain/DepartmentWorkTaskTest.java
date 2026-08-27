@@ -108,4 +108,33 @@ class DepartmentWorkTaskTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("directly to HR audit");
     }
+
+    @Test
+    void hrAssignedTeamLeadCanReviseACompletedReworkSubmission() {
+        UUID teamLeadUserId = UUID.randomUUID();
+        DepartmentWorkTask task = new DepartmentWorkTask(UUID.randomUUID(), UUID.randomUUID(),
+                teamLeadUserId, UUID.randomUUID(), "HR_ADMIN", "TEAM_LEAD",
+                "Prepare weekly delivery evidence", "Attach the completed department evidence",
+                "Operations", LocalDate.now().plusDays(2));
+        task.complete("Initial evidence");
+        task.requestInsightRework("MANAGER", "Add the missing exception evidence");
+        task.assignInsightRework("Attach the exception evidence and rerun validation");
+        task.complete("First rework submission");
+
+        task.reviseInsightReworkSubmission("Corrected rework submission with exception evidence");
+
+        assertThat(task.getStatus()).isEqualTo(WorkTaskStatus.COMPLETED);
+        assertThat(task.getEmployeeUpdate())
+                .isEqualTo("Corrected rework submission with exception evidence");
+    }
+
+    @Test
+    void ordinaryCompletedWorksheetCannotUseInsightsRevisionAction() {
+        DepartmentWorkTask task = task();
+        task.complete("Initial delivery");
+
+        assertThatThrownBy(() -> task.reviseInsightReworkSubmission("Late edit"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("COMPLETED");
+    }
 }

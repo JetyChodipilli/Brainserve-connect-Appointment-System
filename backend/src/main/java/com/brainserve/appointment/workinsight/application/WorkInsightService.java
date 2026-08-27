@@ -190,6 +190,33 @@ public class WorkInsightService {
     }
 
     @Transactional
+    public Insight reviseReworkSubmission(UUID teamLeadUserId, UUID workTaskId, String update) {
+        WorkTaskAuditRecord record = audits.findByWorkTaskId(workTaskId)
+                .orElseThrow(() -> new BusinessException("WORK_INSIGHT_NOT_FOUND",
+                        "The Insights rework request was not found", HttpStatus.NOT_FOUND));
+        if (!record.getTeamLeadUserId().equals(teamLeadUserId)) {
+            throw new BusinessException("WORK_INSIGHT_TEAM_LEAD_SCOPE_DENIED",
+                    "This rework request belongs to another Team Lead", HttpStatus.FORBIDDEN);
+        }
+        if (!TEAM_LEAD_ASSIGNEE.equals(record.getAssigneeRole())) {
+            throw new BusinessException("WORK_INSIGHT_REWORK_UPDATE_DENIED",
+                    "Employee rework must be resubmitted through the employee review flow",
+                    HttpStatus.CONFLICT);
+        }
+        if (record.getAuditStatus() != WorkInsightStatus.REWORK_ASSIGNED) {
+            throw new BusinessException("WORK_INSIGHT_REWORK_UPDATE_CLOSED",
+                    "This rework submission can no longer be updated because HR has already reviewed it",
+                    HttpStatus.CONFLICT);
+        }
+        TaskSnapshot task = tasks.reviseInsightReworkSubmission(teamLeadUserId, workTaskId, update);
+        record.syncTaskStatus(task.status());
+        audit.record("WORK_INSIGHT_REWORK_RESUBMITTED", "WORK_TASK_AUDIT",
+                record.getId().toString(), "{\"workTaskId\":\"" + task.id()
+                        + "\",\"cycle\":" + record.getReworkCycle() + "}");
+        return liveInsight(task, record);
+    }
+
+    @Transactional
     public Insight decideByManager(UUID managerUserId, UUID recordId, boolean approved, String remarks) {
         requireRole(managerUserId, MANAGER, "Only the assigned Manager can decide a work audit");
         WorkTaskAuditRecord record = requireRecord(recordId);

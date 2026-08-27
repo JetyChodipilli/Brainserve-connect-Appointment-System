@@ -49,9 +49,12 @@ test("public booking does not download the complete employee directory", () => {
 });
 
 test("HR account and permission actions fail closed outside the assigned department", () => {
-  assert.match(staffAdministration, /Page<UserAccount> list\(UUID actorId, String query, Pageable pageable\)/);
-  assert.match(staffAdministration, /findHrManagedAccounts\(actorId, departmentId, normalizedQuery, pageable\)/);
-  assert.match(staffAdministration, /departmentHrs\.requireForUser\(actor\.getId\(\)\)\.departmentId\(\)/);
+  assert.ok(sourceIncludes(staffAdministration,
+      "Page<UserAccount> list(UUID actorId, String query, Pageable pageable)"));
+  assert.ok(sourceIncludes(staffAdministration,
+      "findHrManagedAccounts(actorId, departmentId, normalizedQuery, pageable)"));
+  assert.ok(sourceIncludes(staffAdministration,
+      "departmentHrs.requireForUser(actor.getId()).departmentId()"));
   assert.match(staffAdministration, /STAFF_ACCOUNT_DEPARTMENT_SCOPE_DENIED/);
   assert.match(permissionAdministration, /PERMISSION_TARGET_DEPARTMENT_SCOPE_DENIED/);
   assert.match(permissionAdministration, /target\.getRoles\(\)\.isEmpty\(\) \|\| !lowerRoles\.containsAll/);

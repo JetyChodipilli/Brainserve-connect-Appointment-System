@@ -556,11 +556,11 @@ async function allSpringPageContent<T>(path: string, pageSize = 200): Promise<{ 
 }
 
 /**
- * Uses an authenticated fetch stream instead of EventSource because the BrainServe
- * API requires a bearer token. Events contain no business data; they only prompt
- * the client to reload the endpoints already authorized for its signed-in role.
+ * Opens the authenticated server stream for the browser tab elected as the
+ * workspace-update leader. Events contain no business data; they only prompt
+ * clients to reload endpoints already authorized for their signed-in roles.
  */
-export function subscribeToWorkspaceUpdates(
+function subscribeDirectlyToWorkspaceUpdates(
     onUpdate: () => void,
     onStateChange: (state: RealtimeConnectionState) => void,
 ) {
@@ -640,6 +640,288 @@ export function subscribeToWorkspaceUpdates(
     stopped = true;
     controller?.abort();
     if (reconnectTimer) clearTimeout(reconnectTimer);
+  };
+}
+
+const WORKSPACE_UPDATE_CHANNEL = "brainserve.connect.workspace-updates.v1";
+const WORKSPACE_UPDATE_LOCK = "brainserve.connect.workspace-update-leader.v1";
+const WORKSPACE_UPDATE_LEASE_KEY = "brainserve.connect.workspace-update-lease.v1";
+const WORKSPACE_UPDATE_MESSAGE_KEY = "brainserve.connect.workspace-update-message.v1";
+const WORKSPACE_UPDATE_HEARTBEAT_MS = 4_000;
+const WORKSPACE_UPDATE_LEASE_MS = 15_000;
+let workspaceUpdateLeader = false;
+
+export function isWorkspaceUpdateLeader() {
+  return workspaceUpdateLeader;
+}
+
+type WorkspaceUpdateCoordinationMessage = {
+  type: "refresh" | "leader-state" | "leader-released";
+  senderId: string;
+  sentAt: number;
+  state?: RealtimeConnectionState;
+  nonce?: string;
+};
+
+type WorkspaceUpdateLease = {
+  leaderId: string;
+  expiresAt: number;
+};
+
+type WorkspaceUpdateLockManager = {
+  request(
+      name: string,
+      options: { mode: "exclusive"; signal: AbortSignal },
+      callback: () => Promise<void>,
+  ): Promise<void>;
+};
+
+/**
+ * Coordinates live updates across tabs on the same browser origin.
+ *
+ * The Web Locks API provides atomic leader election where available. Exactly one
+ * tab owns the backend stream; followers receive refresh signals over
+ * BroadcastChannel. A localStorage lease/message fallback keeps the behavior safe
+ * in older browsers. Hidden follower tabs do not perform workspace refreshes;
+ * brainserve-app.tsx refreshes them once when they become visible again.
+ */
+export function subscribeToWorkspaceUpdates(
+    onUpdate: () => void,
+    onStateChange: (state: RealtimeConnectionState) => void,
+) {
+  if (typeof window === "undefined") return () => undefined;
+
+  const realtimeStates: RealtimeConnectionState[] = ["connecting", "live", "reconnecting", "offline"];
+  const runtimeCrypto = globalThis.crypto as (Crypto & { randomUUID?: () => string }) | undefined;
+  const tabId = typeof runtimeCrypto?.randomUUID === "function"
+      ? runtimeCrypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  let stopped = false;
+  let leader = false;
+  let leaderState: RealtimeConnectionState = "connecting";
+  let directUnsubscribe: (() => void) | null = null;
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  let fallbackElectionTimer: ReturnType<typeof setInterval> | null = null;
+  let fallbackClaimTimer: ReturnType<typeof setTimeout> | null = null;
+  let usingLeaseFallback = false;
+  let lockAbortController: AbortController | null = null;
+  let releaseWebLock: (() => void) | null = null;
+  let channel: BroadcastChannel | null = null;
+
+  try {
+    if ("BroadcastChannel" in window) channel = new BroadcastChannel(WORKSPACE_UPDATE_CHANNEL);
+  } catch {
+    channel = null;
+  }
+
+  const publish = (message: WorkspaceUpdateCoordinationMessage) => {
+    if (stopped) return;
+    if (channel) {
+      channel.postMessage(message);
+      return;
+    }
+    try {
+      window.localStorage.setItem(WORKSPACE_UPDATE_MESSAGE_KEY, JSON.stringify({
+        ...message,
+        nonce: `${message.sentAt}-${Math.random().toString(36).slice(2)}`,
+      }));
+    } catch {
+      // If browser storage is blocked, leader election falls back to one stream per tab.
+    }
+  };
+
+  const readLease = (): WorkspaceUpdateLease | null => {
+    try {
+      const stored = window.localStorage.getItem(WORKSPACE_UPDATE_LEASE_KEY);
+      if (!stored) return null;
+      const candidate = JSON.parse(stored) as Partial<WorkspaceUpdateLease>;
+      return typeof candidate.leaderId === "string" && typeof candidate.expiresAt === "number"
+          ? { leaderId: candidate.leaderId, expiresAt: candidate.expiresAt }
+          : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const writeLease = () => {
+    try {
+      window.localStorage.setItem(WORKSPACE_UPDATE_LEASE_KEY, JSON.stringify({
+        leaderId: tabId,
+        expiresAt: Date.now() + WORKSPACE_UPDATE_LEASE_MS,
+      } satisfies WorkspaceUpdateLease));
+      return readLease()?.leaderId === tabId;
+    } catch {
+      return false;
+    }
+  };
+
+  const releaseOwnedLease = () => {
+    try {
+      if (readLease()?.leaderId === tabId) window.localStorage.removeItem(WORKSPACE_UPDATE_LEASE_KEY);
+    } catch {
+      // The lease expires automatically if storage becomes unavailable during cleanup.
+    }
+  };
+
+  const publishLeaderState = () => publish({
+    type: "leader-state",
+    senderId: tabId,
+    sentAt: Date.now(),
+    state: leaderState,
+  });
+
+  const stopLeading = (announce: boolean) => {
+    if (!leader) return;
+    leader = false;
+    workspaceUpdateLeader = false;
+    directUnsubscribe?.();
+    directUnsubscribe = null;
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+    if (usingLeaseFallback) releaseOwnedLease();
+    if (announce && !stopped) publish({ type: "leader-released", senderId: tabId, sentAt: Date.now() });
+  };
+
+  const startLeading = () => {
+    if (stopped || leader) return;
+    leader = true;
+    workspaceUpdateLeader = true;
+    leaderState = "connecting";
+    onStateChange(leaderState);
+    publishLeaderState();
+    directUnsubscribe = subscribeDirectlyToWorkspaceUpdates(
+        () => {
+          if (stopped || !leader) return;
+          onUpdate();
+          publish({ type: "refresh", senderId: tabId, sentAt: Date.now() });
+        },
+        (state) => {
+          if (stopped || !leader) return;
+          leaderState = state;
+          onStateChange(state);
+          publishLeaderState();
+        },
+    );
+    heartbeatTimer = setInterval(() => {
+      if (stopped || !leader) return;
+      if (usingLeaseFallback) {
+        const lease = readLease();
+        if (lease && lease.leaderId !== tabId && lease.expiresAt > Date.now()) {
+          stopLeading(false);
+          onStateChange("reconnecting");
+          return;
+        }
+        if (!writeLease()) {
+          stopLeading(false);
+          onStateChange("reconnecting");
+          return;
+        }
+      }
+      publishLeaderState();
+    }, WORKSPACE_UPDATE_HEARTBEAT_MS);
+  };
+
+  const acceptCoordinationMessage = (value: unknown) => {
+    if (!value || typeof value !== "object") return;
+    const message = value as Partial<WorkspaceUpdateCoordinationMessage>;
+    if (message.senderId === tabId || typeof message.senderId !== "string") return;
+    if (message.type === "refresh") {
+      onUpdate();
+      return;
+    }
+    if (message.type === "leader-state" && message.state
+        && realtimeStates.includes(message.state)) {
+      if (!leader) onStateChange(message.state);
+      return;
+    }
+    if (message.type === "leader-released" && !leader) onStateChange("reconnecting");
+  };
+
+  if (channel) channel.onmessage = (event: MessageEvent<unknown>) => acceptCoordinationMessage(event.data);
+
+  const evaluateFallbackLeadership = () => {
+    if (stopped || !usingLeaseFallback) return;
+    const lease = readLease();
+    if (leader) {
+      if (lease && lease.leaderId !== tabId && lease.expiresAt > Date.now()) {
+        stopLeading(false);
+        onStateChange("reconnecting");
+      }
+      return;
+    }
+    if (lease && lease.expiresAt > Date.now()) return;
+    if (fallbackClaimTimer) return;
+    fallbackClaimTimer = setTimeout(() => {
+      fallbackClaimTimer = null;
+      if (stopped || leader) return;
+      const current = readLease();
+      if (current && current.expiresAt > Date.now()) return;
+      if (writeLease()) startLeading();
+    }, 100 + Math.round(Math.random() * 400));
+  };
+
+  const startLeaseFallback = () => {
+    if (stopped || usingLeaseFallback) return;
+    try {
+      const probeKey = `${WORKSPACE_UPDATE_LEASE_KEY}.probe.${tabId}`;
+      window.localStorage.setItem(probeKey, "1");
+      window.localStorage.removeItem(probeKey);
+    } catch {
+      // Browser storage can be disabled by privacy policy. Preserve live updates
+      // by falling back to a direct stream in this tab.
+      startLeading();
+      return;
+    }
+    usingLeaseFallback = true;
+    evaluateFallbackLeadership();
+    fallbackElectionTimer = setInterval(evaluateFallbackLeadership, WORKSPACE_UPDATE_HEARTBEAT_MS);
+  };
+
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key === WORKSPACE_UPDATE_MESSAGE_KEY && event.newValue) {
+      try { acceptCoordinationMessage(JSON.parse(event.newValue)); }
+      catch { /* Ignore malformed messages from unrelated or older clients. */ }
+      return;
+    }
+    if (event.key === WORKSPACE_UPDATE_LEASE_KEY && usingLeaseFallback) evaluateFallbackLeadership();
+  };
+  window.addEventListener("storage", handleStorage);
+  onStateChange("connecting");
+
+  const lockManager = typeof navigator !== "undefined"
+      ? (navigator as Navigator & { locks?: WorkspaceUpdateLockManager }).locks
+      : undefined;
+  if (lockManager?.request) {
+    lockAbortController = new AbortController();
+    void lockManager.request(
+        WORKSPACE_UPDATE_LOCK,
+        { mode: "exclusive", signal: lockAbortController.signal },
+        async () => {
+          if (stopped) return;
+          startLeading();
+          await new Promise<void>((resolve) => { releaseWebLock = resolve; });
+          releaseWebLock = null;
+          stopLeading(false);
+        },
+    ).catch((reason: unknown) => {
+      if (stopped || (reason instanceof DOMException && reason.name === "AbortError")) return;
+      startLeaseFallback();
+    });
+  } else {
+    startLeaseFallback();
+  }
+
+  return () => {
+    stopped = true;
+    window.removeEventListener("storage", handleStorage);
+    lockAbortController?.abort();
+    releaseWebLock?.();
+    releaseWebLock = null;
+    stopLeading(false);
+    if (fallbackElectionTimer) clearInterval(fallbackElectionTimer);
+    if (fallbackClaimTimer) clearTimeout(fallbackClaimTimer);
+    releaseOwnedLease();
+    channel?.close();
   };
 }
 
@@ -909,7 +1191,7 @@ export const brainServeApi = {
     return this.employeePage({ departmentId, page: 0, size: 100 });
   },
   employeePage(filters: { query?: string; departmentId?: string; status?: string;
-    page?: number; size?: number; sort?: string } = {}) {
+    page?: number; size?: number; sort?: string } = {}, signal?: AbortSignal) {
     const params = new URLSearchParams({
       page: String(filters.page ?? 0),
       size: String(Math.max(25, Math.min(filters.size ?? 50, 100))),
@@ -918,7 +1200,10 @@ export const brainServeApi = {
     if (filters.query?.trim()) params.set("query", filters.query.trim());
     if (filters.departmentId) params.set("departmentId", filters.departmentId);
     if (filters.status && filters.status !== "All") params.set("status", filters.status);
-    return requestSpringPage<DepartmentEmployee>(`/employees?${params}`, { cache: "no-store" });
+    return requestSpringPage<DepartmentEmployee>(`/employees?${params}`, {
+      cache: "no-store",
+      signal,
+    });
   },
   departmentEmployeeSummary() {
     return apiRequest<DepartmentEmployeeSummary[]>("/employees/department-summary");
@@ -1425,6 +1710,11 @@ export const brainServeApi = {
   assignWorkInsightRework(taskId: string, guidance: string) {
     return apiRequest<WorkInsight>(`/work-insights/tasks/${taskId}/assign-rework`, {
       method: "POST", body: JSON.stringify({ guidance }),
+    });
+  },
+  reviseWorkInsightRework(taskId: string, update: string) {
+    return apiRequest<WorkInsight>(`/work-insights/tasks/${taskId}/revise-rework`, {
+      method: "POST", body: JSON.stringify({ update }),
     });
   },
   decideWorkInsight(recordId: string, approved: boolean, remarks = "") {

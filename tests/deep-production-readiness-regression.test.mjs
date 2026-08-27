@@ -9,7 +9,8 @@ test("all generated temporary passwords require replacement before workspace acc
   const staff = read("backend/src/main/java/com/brainserve/appointment/iam/application/StaffAccountAdministrationService.java");
   const frontend = read("app/brainserve-app.tsx");
   assert.match(privileged, /encoder\.encode\(temporaryPassword\), true, AccountStatus\.PENDING_APPROVAL/);
-  assert.match(staff, /encoder\.encode\(temporaryPassword\), true, AccountStatus\.PENDING_HR_APPROVAL/);
+  assert.match(staff,
+      /encoder\.encode\(temporaryPassword\),\s*true,\s*AccountStatus\.PENDING_HR_APPROVAL/);
   assert.match(frontend, /forcePasswordChange: true/);
   assert.match(frontend, /Boolean\(account\.forcePasswordChange\)/);
   assert.match(frontend, /Preview verification code/);
@@ -81,10 +82,10 @@ test("production UI uses authoritative departments, consistent naming and access
 
 test("manager approval mail and visitor-pass URLs use production-safe configuration", () => {
   assert.match(read("backend/src/main/java/com/brainserve/appointment/notification/application/NotificationDispatcher.java"),
-    /case "MANAGER_VISIT_APPROVAL_REQUIRED"/);
+      /case "MANAGER_VISIT_APPROVAL_REQUIRED"/);
   const visitorPass = read("backend/src/main/java/com/brainserve/appointment/appointment/application/VisitorPassService.java");
   assert.match(visitorPass, /brainserve\.frontend\.public-url/);
   assert.doesNotMatch(visitorPass, /https:\/\/brainserve\.in\/visitor-pass/);
   assert.match(read("backend/src/main/resources/application.properties"),
-    /brainserve\.notification\.from=\$\{MAIL_FROM:noreply@brainserve\.in}/);
+      /brainserve\.notification\.from=\$\{MAIL_FROM:noreply@brainserve\.in}/);
 });

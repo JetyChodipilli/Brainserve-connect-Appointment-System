@@ -54,6 +54,13 @@ public class WorkInsightController {
         return service.assignRework(actor(jwt), taskId, request.guidance());
     }
 
+    @PostMapping("/tasks/{taskId}/revise-rework")
+    @PreAuthorize("hasRole('TEAM_LEAD') and hasAuthority('WORK_TASK_REVIEW')")
+    WorkInsightService.Insight reviseRework(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID taskId,
+                                            @Valid @RequestBody SubmissionUpdateRequest request) {
+        return service.reviseReworkSubmission(actor(jwt), taskId, request.update());
+    }
+
     @PostMapping("/{recordId}/ceo-decision")
     @PreAuthorize("hasRole('CEO') and hasAuthority('WORK_INSIGHT_CEO_APPROVE')")
     WorkInsightService.Insight decide(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID recordId,
@@ -73,4 +80,5 @@ public class WorkInsightController {
     public record DecisionRequest(@NotNull Boolean approved, @Size(max = 1000) String remarks) {}
     public record ReworkRequest(@NotBlank @Size(max = 1000) String reason) {}
     public record GuidanceRequest(@NotBlank @Size(max = 1000) String guidance) {}
+    public record SubmissionUpdateRequest(@NotBlank @Size(max = 1000) String update) {}
 }

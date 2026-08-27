@@ -146,6 +146,15 @@ public class DepartmentWorkTask extends AuditableEntity {
         acknowledgedAt = null;
     }
 
+    public void reviseInsightReworkSubmission(String update) {
+        if (!"TEAM_LEAD".equals(assigneeRole) || status != WorkTaskStatus.COMPLETED
+                || reworkCycle < 1 || insightReviewReason == null) {
+            invalid("updated after rework submission");
+        }
+        employeeUpdate = required(update, "A revised completion update is required");
+        completedAt = Instant.now();
+    }
+
     public boolean isOverdue(LocalDate today) {
         return dueDate.isBefore(today) && !isReadyForHrAudit();
     }

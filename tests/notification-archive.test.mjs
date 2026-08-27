@@ -43,7 +43,8 @@ test("notification sections fail independently and background polling cannot ove
   assert.match(ui, /Recipient directory is reconnecting/);
   assert.match(ui, /Other message data remains available/);
   assert.match(ui, /Some message data is temporarily stale/);
-  assert.match(ui, /window\.setInterval\(refresh, 30000\)/);
+  assert.match(ui,
+      /window\.setInterval\(\(\) => \{[\s\S]*?isWorkspaceUpdateLeader\(\)[\s\S]*?refresh\(\)[\s\S]*?\}, 30000\)/);
 });
 
 test("notification delivery does not hold database transactions during network calls", () => {

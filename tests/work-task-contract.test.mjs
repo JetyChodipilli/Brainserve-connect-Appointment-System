@@ -101,12 +101,14 @@ test("task sheets use a compact readable summary with progressive disclosure", (
   assert.ok(app.includes("View details"));
   assert.ok(styles.includes(".task-sheet-brief p"));
   assert.ok(styles.includes("-webkit-line-clamp: 2"));
-  assert.ok(styles.includes(".task-sheet-summary h2 { min-height: 46px"));
+  assert.ok(styles.includes(".task-sheet-summary h2 { min-height: 0"));
   assert.ok(styles.includes("repeat(auto-fit, minmax(min(100%, 390px), 1fr))"));
   assert.ok(styles.includes("white-space: pre-wrap"));
   assert.ok(styles.includes("align-items: start"));
   assert.ok(app.includes('className="task-sheet-summary-alert-slot"'));
-  assert.ok(styles.includes(".task-sheet-summary-alert-slot { min-height: 27px"));
+  assert.ok(styles.includes(".task-sheet-summary-alert-slot { min-height: 0"));
+  assert.ok(styles.includes(".task-sheet-card.is-expanded .task-sheet-summary-meta"));
+  assert.ok(styles.includes(".task-sheet-card { display: flex; flex-direction: column; min-width: 0; padding: 12px"));
   assert.ok(app.includes("{expanded && <>"));
 });
 

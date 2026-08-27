@@ -250,6 +250,24 @@ public class DepartmentWorkTaskService implements WorkTaskDirectory {
         return snapshot(task);
     }
 
+    @Override
+    @Transactional
+    public TaskSnapshot reviseInsightReworkSubmission(UUID teamLeadUserId, UUID workTaskId,
+                                                      String update) {
+        DepartmentWorkTask task = requireTeamLeadScope(teamLeadUserId, workTaskId);
+        if (!TEAM_LEAD_ASSIGNEE.equals(task.getAssigneeRole())) {
+            throw new BusinessException("WORK_INSIGHT_REWORK_UPDATE_DENIED",
+                    "Only a Team Lead worksheet assigned by HR can use this rework update",
+                    HttpStatus.CONFLICT);
+        }
+        task.reviseInsightReworkSubmission(update);
+        publishHrNotification(teamLeadUserId, task,
+                "Team Lead updated and resubmitted rework for worksheet ‘" + task.getTitle()
+                        + "’. It is ready for HR re-audit.");
+        audit(task, "REWORK_RESUBMITTED");
+        return snapshot(task);
+    }
+
     @Transactional
     public DepartmentWorkTask start(UUID userId, UUID employeeId, UUID taskId, String update) {
         DepartmentWorkTask task = requireProgressScope(userId, employeeId, taskId);

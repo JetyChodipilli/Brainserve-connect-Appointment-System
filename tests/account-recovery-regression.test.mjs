@@ -4,16 +4,16 @@ import test from "node:test";
 
 const app = readFileSync(new URL("../app/brainserve-app.tsx", import.meta.url), "utf8");
 const service = readFileSync(new URL(
-  "../backend/src/main/java/com/brainserve/appointment/iam/application/AccountRecoveryService.java",
-  import.meta.url,
+    "../backend/src/main/java/com/brainserve/appointment/iam/application/AccountRecoveryService.java",
+    import.meta.url,
 ), "utf8");
 const controller = readFileSync(new URL(
-  "../backend/src/main/java/com/brainserve/appointment/iam/api/SystemAdminAccountRecoveryController.java",
-  import.meta.url,
+    "../backend/src/main/java/com/brainserve/appointment/iam/api/SystemAdminAccountRecoveryController.java",
+    import.meta.url,
 ), "utf8");
 const writer = readFileSync(new URL(
-  "../backend/src/main/java/com/brainserve/appointment/iam/application/AccountRecoveryRequestWriter.java",
-  import.meta.url,
+    "../backend/src/main/java/com/brainserve/appointment/iam/application/AccountRecoveryRequestWriter.java",
+    import.meta.url,
 ), "utf8");
 
 test("valid role-changed accounts can request recovery and the admin queue refreshes automatically", () => {
@@ -22,7 +22,8 @@ test("valid role-changed accounts can request recovery and the admin queue refre
   assert.match(service, /normalized\.contains\("@"\)/);
   assert.match(service, /findByEmailIgnoreCase\(normalized\)[\s\S]*?filter\(UserAccount::isEnabled\)/);
   assert.match(app, /identifier\.includes\("@"\)[\s\S]*?account\.email\.toLowerCase\(\) === normalizedIdentifier/);
-  assert.match(app, /setInterval\(\(\) => void loadRequests\(false\), 10000\)/);
+  assert.match(app,
+      /setInterval\(\(\) => \{[\s\S]*?isWorkspaceUpdateLeader\(\)[\s\S]*?loadRequests\(false\)[\s\S]*?\}, 10000\)/);
   assert.match(app, /addEventListener\("focus", refreshWhenVisible\)/);
   assert.match(app, /addEventListener\("visibilitychange", refreshWhenVisible\)/);
   assert.match(controller, /private static SystemRole displayRole/);

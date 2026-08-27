@@ -107,6 +107,17 @@ test("frontend subscribes with the access token and coalesces role-scoped refres
     assert.ok(frontend.includes("className={`live-status"));
 });
 
+test("multiple tabs share one live backend stream through browser leader election", () => {
+    assert.ok(frontendApi.includes("subscribeDirectlyToWorkspaceUpdates"));
+    assert.ok(frontendApi.includes("WORKSPACE_UPDATE_LOCK"));
+    assert.ok(frontendApi.includes("BroadcastChannel"));
+    assert.ok(frontendApi.includes("WORKSPACE_UPDATE_LEASE_KEY"));
+    assert.ok(frontendApi.includes("isWorkspaceUpdateLeader"));
+    assert.ok(frontendApi.includes('type: "refresh"'));
+    assert.ok(frontend.includes('document.visibilityState !== "visible"'));
+    assert.ok(frontend.includes("if (isWorkspaceUpdateLeader())"));
+});
+
 test("public brand and internal-call language are product-facing", () => {
     assert.ok(
         frontend.includes(

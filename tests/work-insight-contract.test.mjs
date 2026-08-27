@@ -46,12 +46,17 @@ test("HR, Manager or CEO rejection creates an actionable Team Lead rework cycle"
   assert.ok(governanceMigration.includes("MANAGER_REWORK_REQUESTED"));
   assert.ok(controller.includes('/tasks/{taskId}/request-rework'));
   assert.ok(controller.includes('/tasks/{taskId}/assign-rework'));
+  assert.ok(controller.includes('/tasks/{taskId}/revise-rework'));
   assert.ok(service.includes("requestInsightRework"));
   assert.ok(service.includes("assignInsightRework"));
+  assert.ok(service.includes("reviseReworkSubmission"));
   assert.ok(app.includes("Create rework plan"));
+  assert.ok(app.includes("Update & resubmit"));
+  assert.ok(app.includes("Awaiting HR re-audit"));
   assert.ok(app.includes("Reject & rework"));
   assert.ok(api.includes("requestWorkInsightRework"));
   assert.ok(api.includes("assignWorkInsightRework"));
+  assert.ok(api.includes("reviseWorkInsightRework"));
 });
 
 test("HR audit, Manager verification and CEO decision endpoints are independently role locked", () => {
