@@ -21,5 +21,9 @@ test("logout revokes the backend refresh session before leaving the app", () => 
   assert.match(app, /try \{\s*await brainServeApi\.logout\(\);\s*\}\s*finally \{\s*writePreviewWorkspaceSession\(null\);\s*setScreen\("welcome"\);/);
   assert.match(api, /apiRequest<void>\("\/auth\/logout"/);
   assert.match(authController, /@PostMapping\("\/logout"\)/);
-  assert.match(authentication, /findByTokenHash\(hash\(refreshToken\)\)\.ifPresent\(RefreshTokenSession::revoke\)/);
+  assert.match(authController, /@PostMapping\("\/logout"\)\s*@ResponseStatus\(HttpStatus\.NO_CONTENT\)/);
+  assert.match(authentication, /securityState\.revokePresentedRefreshToken\(hash\(refreshToken\), Instant\.now\(\)\)/);
+  assert.match(api, /const token = refreshToken;\s*setAccessToken\(null\)/);
+  assert.match(api, /keepalive: true/);
+  assert.match(api, /response\.status === 204 \|\| !contentType\.includes\("json"\)/);
 });

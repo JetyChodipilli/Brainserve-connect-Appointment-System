@@ -37,6 +37,7 @@ public class AuthenticationService {
     private final CompanyEmailPolicy emailPolicy;
     private final EmailService emailService;
     private final StringRedisTemplate redis;
+    private final AuthenticationSecurityStateWriter securityState;
     private final long refreshTokenDays;
     private final long passwordChangeOtpMinutes;
     private final SecureRandom secureRandom = new SecureRandom();
@@ -44,11 +45,12 @@ public class AuthenticationService {
     public AuthenticationService(UserAccountRepository users, RefreshTokenSessionRepository sessions,
                                  PasswordEncoder passwordEncoder, JwtService jwtService,
                                  CompanyEmailPolicy emailPolicy, EmailService emailService, StringRedisTemplate redis,
+                                 AuthenticationSecurityStateWriter securityState,
                                  @Value("${brainserve.security.refresh-token-days}") long refreshTokenDays,
                                  @Value("${brainserve.security.password-change-otp-minutes:10}") long passwordChangeOtpMinutes) {
         this.users = users; this.sessions = sessions; this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService; this.emailPolicy = emailPolicy; this.emailService = emailService;
-        this.redis = redis; this.refreshTokenDays = refreshTokenDays;
+        this.redis = redis; this.securityState = securityState; this.refreshTokenDays = refreshTokenDays;
         this.passwordChangeOtpMinutes = passwordChangeOtpMinutes;
     }
 
@@ -62,7 +64,7 @@ public class AuthenticationService {
         }
         if (user.isLocked()) throw invalidCredentials();
         if (!passwordEncoder.matches(password, user.getPasswordHash())) {
-            user.recordFailedLogin();
+            securityState.recordFailedLogin(user.getId());
             throw invalidCredentials();
         }
         requireOperationalProfile(user);
@@ -70,13 +72,13 @@ public class AuthenticationService {
         return createPair(user, UUID.randomUUID());
     }
 
-    @Transactional
+    @Transactional(readOnly = true)
     public TokenPair refresh(String refreshToken) {
         String currentHash = hash(refreshToken);
         RefreshTokenSession current = sessions.findByTokenHash(currentHash)
                 .orElseThrow(this::invalidRefreshToken);
         if (current.isRevoked()) {
-            sessions.revokeFamily(current.getFamilyId(), Instant.now());
+            securityState.revokeRefreshTokenFamily(current.getFamilyId(), Instant.now());
             throw invalidRefreshToken();
         }
         if (!current.isUsable()) throw invalidRefreshToken();
@@ -87,16 +89,17 @@ public class AuthenticationService {
         requireOperationalProfile(user);
         String nextToken = randomToken();
         String nextHash = hash(nextToken);
-        current.rotateTo(nextHash);
-        sessions.save(new RefreshTokenSession(user.getId(), nextHash, current.getFamilyId(),
-                Instant.now().plus(refreshTokenDays, ChronoUnit.DAYS)));
+        var rotation = securityState.rotateRefreshToken(currentHash, nextHash, user.getId(),
+                Instant.now().plus(refreshTokenDays, ChronoUnit.DAYS));
+        if (rotation != AuthenticationSecurityStateWriter.RefreshRotation.ROTATED) {
+            throw invalidRefreshToken();
+        }
         JwtService.AccessToken access = jwtService.issue(user);
         return new TokenPair(access.value(), access.expiresAt(), nextToken, user.isForcePasswordChange());
     }
 
-    @Transactional
     public void logout(String refreshToken) {
-        sessions.findByTokenHash(hash(refreshToken)).ifPresent(RefreshTokenSession::revoke);
+        securityState.revokePresentedRefreshToken(hash(refreshToken), Instant.now());
     }
 
     @Transactional

@@ -41,9 +41,11 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
     void logout(@Valid @RequestBody RefreshRequest request) { authentication.logout(request.refreshToken()); }
 
     @PostMapping("/logout-all")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
     void logoutAll(@AuthenticationPrincipal Jwt jwt) { authentication.logoutAll(UUID.fromString(jwt.getSubject())); }
 
     @PostMapping("/change-password/request-otp")
@@ -73,13 +75,14 @@ public class AuthController {
         return new MeResponse(user.getId(), user.getEmployeeId(), user.getEmail(), roles, permissions, user.isForcePasswordChange());
     }
 
-    public record LoginRequest(@NotBlank @Email String email, @NotBlank @Size(min = 8, max = 128) String password) {}
-    public record RefreshRequest(@NotBlank String refreshToken) {}
+    public record LoginRequest(@NotBlank @Email @Size(max = 180) String email,
+                               @NotBlank @Size(min = 8, max = 128) String password) {}
+    public record RefreshRequest(@NotBlank @Size(max = 512) String refreshToken) {}
     public record PasswordChangeOtpRequest(@NotBlank @Size(max = 128) String currentPassword) {}
     public record PasswordChangeConfirmRequest(
             @NotBlank @jakarta.validation.constraints.Pattern(regexp = "\\d{6}") String otp,
             @NotBlank @Size(min = 12, max = 64) String newPassword) {}
-    public record ChangeEmailRequest(@NotBlank String currentPassword,
+    public record ChangeEmailRequest(@NotBlank @Size(max = 128) String currentPassword,
                                      @NotBlank @Email @Size(max = 180) String newEmail) {}
     public record MeResponse(UUID userId, UUID employeeId, String email, Set<String> roles, Set<String> permissions,
                              boolean forcePasswordChange) {}

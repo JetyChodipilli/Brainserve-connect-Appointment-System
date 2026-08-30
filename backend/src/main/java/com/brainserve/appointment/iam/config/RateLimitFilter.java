@@ -49,6 +49,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
         if (!"POST".equals(request.getMethod()) && !"DELETE".equals(request.getMethod())) return null;
         String path = request.getRequestURI();
         if (path.equals("/api/v1/auth/login") || path.equals("/api/auth/login")) return new Rule("login", 10, 900);
+        if (path.equals("/api/v1/auth/refresh") || path.equals("/api/auth/refresh"))
+            return new Rule("token-refresh", 120, 60);
+        if (path.equals("/api/v1/auth/logout") || path.equals("/api/auth/logout"))
+            return new Rule("logout", 60, 60);
         if (path.equals("/api/v1/auth/change-password/request-otp") || path.equals("/api/auth/change-password/request-otp"))
             return new Rule("password-change-request", 5, 3600);
         if (path.equals("/api/v1/auth/change-password/confirm") || path.equals("/api/auth/change-password/confirm"))

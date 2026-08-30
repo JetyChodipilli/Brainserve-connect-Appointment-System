@@ -1,13 +1,18 @@
 package com.brainserve.appointment.document.application;
 
 import com.brainserve.appointment.audit.api.AuditService;
+import com.brainserve.appointment.audit.api.RejectedSecurityAuditService;
+import com.brainserve.appointment.departmenthr.api.DepartmentHrDirectory;
 import com.brainserve.appointment.document.api.DocumentEvents;
 import com.brainserve.appointment.document.api.ProfilePhotoStore;
 import com.brainserve.appointment.document.domain.DocumentStatus;
 import com.brainserve.appointment.document.domain.StoredDocument;
 import com.brainserve.appointment.document.infrastructure.ClamAvScanner;
 import com.brainserve.appointment.document.infrastructure.StoredDocumentRepository;
+import com.brainserve.appointment.employee.api.EmployeeDirectory;
+import com.brainserve.appointment.iam.api.StaffCommunicationDirectory;
 import com.brainserve.appointment.shared.application.BusinessException;
+import com.brainserve.appointment.visitor.api.VisitorDirectory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
@@ -35,30 +40,49 @@ import java.util.UUID;
 @Service
 public class DocumentService implements ProfilePhotoStore {
     private static final Set<String> ALLOWED_TYPES = Set.of("image/jpeg", "image/png", "application/pdf");
+    private static final String CEO = "ROLE_CEO";
+    private static final String HR = "ROLE_HR_ADMIN";
     private final StoredDocumentRepository documents;
     private final ClamAvScanner scanner;
     private final S3Client s3;
     private final S3Presigner presigner;
     private final AuditService audit;
     private final ApplicationEventPublisher events;
+    private final StaffCommunicationDirectory staff;
+    private final EmployeeDirectory employees;
+    private final DepartmentHrDirectory departmentHrs;
+    private final VisitorDirectory visitors;
+    private final RejectedSecurityAuditService rejectedAudit;
     private final String bucket;
     private final long maxBytes;
     private final long urlMinutes;
 
     public DocumentService(StoredDocumentRepository documents, ClamAvScanner scanner, S3Client s3, S3Presigner presigner,
                            AuditService audit, ApplicationEventPublisher events,
+                           StaffCommunicationDirectory staff, EmployeeDirectory employees,
+                           DepartmentHrDirectory departmentHrs, VisitorDirectory visitors,
+                           RejectedSecurityAuditService rejectedAudit,
                            @Value("${brainserve.document.bucket}") String bucket,
                            @Value("${brainserve.document.max-bytes}") long maxBytes,
                            @Value("${brainserve.document.download-url-minutes}") long urlMinutes) {
         this.documents = documents; this.scanner = scanner; this.s3 = s3; this.presigner = presigner;
-        this.audit = audit; this.events = events; this.bucket = bucket; this.maxBytes = maxBytes; this.urlMinutes = urlMinutes;
+        this.audit = audit; this.events = events; this.staff = staff; this.employees = employees;
+        this.departmentHrs = departmentHrs; this.visitors = visitors; this.rejectedAudit = rejectedAudit;
+        this.bucket = bucket; this.maxBytes = maxBytes;
+        this.urlMinutes = Math.max(1, Math.min(urlMinutes, 15));
     }
 
     @Transactional
-    public StoredDocument upload(String ownerType, UUID ownerId, String category, MultipartFile file) {
+    public StoredDocument upload(UUID actorUserId, String ownerType, UUID ownerId, String category, MultipartFile file) {
+        requireOwnerAccess(actorUserId, ownerType, ownerId, true);
+        return upload(ownerType, ownerId, category, file);
+    }
+
+    private StoredDocument upload(String ownerType, UUID ownerId, String category, MultipartFile file) {
         validate(file);
         try {
             byte[] bytes = file.getBytes();
+            validateSignature(file.getContentType(), bytes);
             scanner.assertClean(bytes);
             String objectKey = ownerType.toLowerCase() + "/" + ownerId + "/" + UUID.randomUUID();
             String digest = sha256(bytes);
@@ -82,19 +106,21 @@ public class DocumentService implements ProfilePhotoStore {
     }
 
     @Transactional(readOnly = true)
-    public StoredDocument get(UUID id) {
+    private StoredDocument get(UUID id) {
         return documents.findById(id).filter(value -> value.getStatus() == DocumentStatus.CLEAN)
                 .orElseThrow(() -> new BusinessException("DOCUMENT_NOT_FOUND", "Document was not found", HttpStatus.NOT_FOUND));
     }
 
     @Transactional(readOnly = true)
-    public List<StoredDocument> list(String ownerType, UUID ownerId) {
+    public List<StoredDocument> list(UUID actorUserId, String ownerType, UUID ownerId) {
+        requireOwnerAccess(actorUserId, ownerType, ownerId, false);
         return documents.findByOwnerTypeAndOwnerIdOrderByCreatedAtDesc(ownerType.toUpperCase(), ownerId).stream()
                 .filter(value -> value.getStatus() == DocumentStatus.CLEAN).toList();
     }
 
-    public String createDownloadUrl(UUID id) {
+    public String createDownloadUrl(UUID actorUserId, UUID id) {
         StoredDocument document = get(id);
+        requireOwnerAccess(actorUserId, document.getOwnerType(), document.getOwnerId(), false);
         var request = GetObjectRequest.builder().bucket(bucket).key(document.getObjectKey())
                 .responseContentDisposition("attachment; filename=\"" + safeFilename(document.getOriginalFilename()) + "\"").build();
         String url = presigner.presignGetObject(GetObjectPresignRequest.builder().signatureDuration(Duration.ofMinutes(urlMinutes))
@@ -145,8 +171,9 @@ public class DocumentService implements ProfilePhotoStore {
     }
 
     @Transactional
-    public void delete(UUID id) {
+    public void delete(UUID actorUserId, UUID id) {
         StoredDocument document = get(id);
+        requireOwnerAccess(actorUserId, document.getOwnerType(), document.getOwnerId(), true);
         s3.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(document.getObjectKey()).build());
         document.delete();
         audit.record("DOCUMENT_DELETE", document.getOwnerType(), document.getOwnerId().toString(), "{\"documentId\":\"" + id + "\"}");
@@ -157,6 +184,75 @@ public class DocumentService implements ProfilePhotoStore {
         if (file.getSize() > maxBytes) throw new BusinessException("DOCUMENT_TOO_LARGE", "File exceeds the configured size limit", HttpStatus.PAYLOAD_TOO_LARGE);
         if (file.getContentType() == null || !ALLOWED_TYPES.contains(file.getContentType()))
             throw new BusinessException("DOCUMENT_TYPE_NOT_ALLOWED", "Only JPEG, PNG and PDF files are accepted", HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    private void validateSignature(String contentType, byte[] bytes) {
+        boolean matches = switch (contentType) {
+            case "image/jpeg" -> startsWith(bytes, new byte[]{(byte) 0xff, (byte) 0xd8, (byte) 0xff});
+            case "image/png" -> startsWith(bytes,
+                    new byte[]{(byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a});
+            case "application/pdf" -> startsWith(bytes, new byte[]{0x25, 0x50, 0x44, 0x46, 0x2d});
+            default -> false;
+        };
+        if (!matches) {
+            throw new BusinessException("DOCUMENT_CONTENT_MISMATCH",
+                    "The file content does not match its declared type", HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+        }
+    }
+
+    private boolean startsWith(byte[] value, byte[] prefix) {
+        if (value.length < prefix.length) return false;
+        for (int index = 0; index < prefix.length; index++) {
+            if (value[index] != prefix[index]) return false;
+        }
+        return true;
+    }
+
+    private void requireOwnerAccess(UUID actorUserId, String ownerType, UUID ownerId, boolean write) {
+        String normalizedOwnerType = ownerType.toUpperCase();
+        var actor = staff.requireActive(actorUserId);
+        boolean permitted;
+        try {
+            permitted = switch (normalizedOwnerType) {
+                case "EMPLOYEE" -> employeeAccessPermitted(actor, ownerId, write);
+                case "VISITOR" -> visitorAccessPermitted(actor, ownerId, write);
+                default -> false;
+            };
+        } catch (BusinessException ignored) {
+            permitted = false;
+        }
+        if (!permitted) denyAccess(normalizedOwnerType, ownerId, write);
+    }
+
+    private boolean employeeAccessPermitted(StaffCommunicationDirectory.StaffMember actor,
+                                            UUID employeeId, boolean write) {
+        employees.requireEmployee(employeeId);
+        UUID departmentId = employees.departmentIdForEmployee(employeeId);
+        if (actor.roles().contains(HR)) {
+            return departmentHrs.activeForUser(actor.userId())
+                    .map(assignment -> assignment.departmentId().equals(departmentId))
+                    .orElse(false);
+        }
+        return !write && actor.roles().contains(CEO);
+    }
+
+    private boolean visitorAccessPermitted(StaffCommunicationDirectory.StaffMember actor,
+                                           UUID visitorId, boolean write) {
+        visitors.requireVisitor(visitorId);
+        // Visitor identities currently have no trustworthy department owner.
+        // Keep HR mutations and reads closed until that relationship exists;
+        // the company CEO may read existing evidence but may not modify it.
+        return !write && actor.roles().contains(CEO);
+    }
+
+    private void denyAccess(String ownerType, UUID ownerId, boolean write) {
+        try {
+            rejectedAudit.record("DOCUMENT_ACCESS_REJECTED", ownerType, ownerId.toString(),
+                    "{\"operation\":\"" + (write ? "WRITE" : "READ") + "\"}");
+        } catch (RuntimeException ignored) {
+            // Access still fails closed if the secondary rejected-event audit is unavailable.
+        }
+        throw new BusinessException("DOCUMENT_NOT_FOUND", "Document was not found", HttpStatus.NOT_FOUND);
     }
     private String safeFilename(String value) {
         String name = value == null ? "document" : value.replace('\\', '/');

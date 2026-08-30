@@ -77,3 +77,72 @@ the PostgreSQL partition remains attached.
 
 Run a monthly restore drill using `ops/postgres/PITR_RUNBOOK.md` and keep the
 result with the governance evidence for that month.
+
+
+# Security hardening notes
+
+This repository applies layered controls at the browser, API, database and
+container boundaries. Security-sensitive changes must preserve these rules:
+
+- Failed login counters and refresh-token family revocations commit in an
+  independent transaction even when the rejected request rolls back.
+- Refresh rotation and logout take a database write lock on the presented
+  token. Concurrent replay revokes the complete token family instead of
+  producing two successor sessions or leaving a raced successor active.
+- Private employee documents are authorized against the authenticated actor's
+  current role and department. Client-supplied owner identifiers are never an
+  authorization decision.
+- Uploaded JPEG, PNG and PDF files must pass size, declared-type, file-signature
+  and ClamAV checks before private object storage is updated.
+- Employee document access is department scoped. Visitor document mutation is
+  denied until visitor identities have a trustworthy department-owner link;
+  only the CEO may read already-stored visitor evidence.
+- Raw refresh tokens are never persisted by the backend. Expired token hashes
+  remain available for the configured investigation window and are then
+  removed by the session-retention worker.
+- Local infrastructure ports bind to loopback. Production deployments should
+  expose only a TLS reverse proxy, the frontend and explicitly required health
+  endpoints.
+- `FORWARD_HEADERS_STRATEGY` defaults to `none`. Set it to `framework` only when
+  the backend is behind a trusted proxy that removes untrusted forwarded
+  headers before adding its own.
+- The production frontend sends CSP, anti-framing, MIME-sniffing, referrer,
+  browser-capability and HSTS headers. Extend CSP allowlists narrowly when a
+  new trusted API or object-storage origin is introduced.
+- The runtime frontend image is built from pruned production dependencies.
+  CI rejects high/critical advisories in the complete npm graph. Dependabot
+  opens bounded weekly npm, Maven and GitHub Actions updates for review.
+
+## Re-audit status
+
+The second pass found and corrected a refresh-token race, an unscoped visitor
+document path, and a container boundary that copied development dependencies
+into the runtime image. `npm audit --omit=dev` reports zero vulnerabilities.
+The full graph has four moderate advisories under the development-only
+`drizzle-kit` chain; npm's proposed remediation is a breaking downgrade, and
+those packages are not copied into the production image.
+
+No source review or dependency scanner can prove that an application has no
+security defects. The remaining architectural risks requiring separate,
+coordinated migrations are: bearer tokens remain readable by same-origin
+JavaScript in per-tab `sessionStorage`, and the production CSP still needs
+`'unsafe-inline'` for the current Vinext bootstrap. Moving refresh tokens to
+SameSite HttpOnly cookies and adopting nonce/hash-based scripts must include
+CSRF, CORS, deployment and browser regression work.
+
+## Retention settings
+
+`EXPIRED_SESSION_RETENTION_DAYS` defaults to 30 and is clamped to 1–365 days.
+It applies only to expired refresh-token hashes; it does not delete audit,
+appointment, work-board or legal-hold evidence. Existing governed dataset
+retention remains managed through the Data Governance workspace and Flyway
+policies.
+
+## Browser session boundary
+
+Access and refresh tokens remain in per-tab `sessionStorage` for compatibility
+with the current stateless bearer-token API. Logout clears them before the
+network request and then attempts backend revocation. A future move to
+same-site HttpOnly refresh cookies requires to be coordinated CSRF, CORS and API
+deployment changes and should be delivered as a separate migration rather than
+mixed into a maintenance patch.

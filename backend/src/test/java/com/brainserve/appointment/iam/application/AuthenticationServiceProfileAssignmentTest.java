@@ -32,7 +32,8 @@ class AuthenticationServiceProfileAssignmentTest {
         when(users.findByEmailIgnoreCase("employee@brainserve.in")).thenReturn(Optional.of(employee));
         when(encoder.matches("Employee!Pass2026", "bcrypt-hash")).thenReturn(true);
         AuthenticationService service = new AuthenticationService(users, sessions, encoder, jwt,
-                mock(CompanyEmailPolicy.class), mock(EmailService.class), mock(StringRedisTemplate.class), 14, 10);
+                mock(CompanyEmailPolicy.class), mock(EmailService.class), mock(StringRedisTemplate.class),
+                mock(AuthenticationSecurityStateWriter.class), 14, 10);
 
         assertThatThrownBy(() -> service.login("employee@brainserve.in", "Employee!Pass2026"))
                 .isInstanceOfSatisfying(BusinessException.class, error -> {

@@ -1,4 +1,4 @@
-services:
+evservices:
   postgres:
     image: postgres:17.2-alpine
     entrypoint: ["/bin/sh", "/opt/brainserve/postgres-entrypoint.sh"]
@@ -12,7 +12,7 @@ services:
       - ./ops/postgres/postgres-entrypoint.sh:/opt/brainserve/postgres-entrypoint.sh:ro
       - ./ops/postgres/01-replication-hba.sh:/docker-entrypoint-initdb.d/01-replication-hba.sh:ro
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U brainserve -d brainserve"]
       interval: 5s
@@ -51,7 +51,7 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "6379:6379"
+      - "127.0.0.1:${REDIS_HOST_PORT:-6380}:6379"
     healthcheck:
       test:
         [
@@ -89,7 +89,7 @@ services:
     volumes:
       - kafka_1_data:/var/lib/kafka/data
     ports:
-      - "9092:9092"
+      - "127.0.0.1:9092:9092"
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list >/dev/null 2>&1"]
       interval: 10s
@@ -124,7 +124,7 @@ services:
     volumes:
       - kafka_2_data:/var/lib/kafka/data
     ports:
-      - "9094:9092"
+      - "127.0.0.1:9094:9092"
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list >/dev/null 2>&1"]
       interval: 10s
@@ -159,7 +159,7 @@ services:
     volumes:
       - kafka_3_data:/var/lib/kafka/data
     ports:
-      - "9096:9092"
+      - "127.0.0.1:9096:9092"
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list >/dev/null 2>&1"]
       interval: 10s
@@ -177,8 +177,8 @@ services:
     volumes:
       - minio_data:/data
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     restart: unless-stopped
 
   minio-init:
@@ -211,8 +211,8 @@ services:
   mailpit:
     image: axllent/mailpit:v1.21
     ports:
-      - "1025:1025"
-      - "8025:8025"
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
     restart: unless-stopped
 
   backend:
@@ -240,6 +240,9 @@ services:
       ACCOUNT_ARCHIVE_OTP_MAX_ATTEMPTS: "${ACCOUNT_ARCHIVE_OTP_MAX_ATTEMPTS:-5}"
       ADMIN_PASSWORD_VERIFICATION_LOCK_MINUTES: "${ADMIN_PASSWORD_VERIFICATION_LOCK_MINUTES:-15}"
       ACCOUNT_ARCHIVE_RETENTION_YEARS: "${ACCOUNT_ARCHIVE_RETENTION_YEARS:-7}"
+      EXPIRED_SESSION_RETENTION_DAYS: "${EXPIRED_SESSION_RETENTION_DAYS:-30}"
+      SESSION_RETENTION_CRON: "${SESSION_RETENTION_CRON:-0 25 3 * * *}"
+      FORWARD_HEADERS_STRATEGY: "${FORWARD_HEADERS_STRATEGY:-none}"
       ACCOUNT_CLOSURE_CRON: "${ACCOUNT_CLOSURE_CRON:-0 5 0 * * *}"
 
       DASHBOARD_CACHE_SECONDS: "${DASHBOARD_CACHE_SECONDS:-180}"
@@ -269,7 +272,7 @@ services:
       FRONTEND_PUBLIC_URL: "${FRONTEND_PUBLIC_URL:-http://localhost:3000}"
       BRAIN_SERVE_ALLOWED_ORIGINS: "${BRAIN_SERVE_ALLOWED_ORIGINS:-http://localhost:3000}"
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -304,7 +307,7 @@ services:
     environment:
       NEXT_PUBLIC_API_BASE_URL: "${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8080/api/v1}"
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       backend:
         condition: service_healthy

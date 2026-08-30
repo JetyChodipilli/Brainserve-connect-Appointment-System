@@ -481,7 +481,8 @@ async function performApiRequest<T>(path: string, init: RequestInit = {}, retry 
       const problem = (await response.json().catch(() => ({}))) as ProblemResponse;
       throw new ApiError(response.status, problem);
     }
-    if (response.status === 204) return undefined as T;
+    const contentType = response.headers.get("Content-Type")?.toLowerCase() ?? "";
+    if (response.status === 204 || !contentType.includes("json")) return undefined as T;
     return response.json() as Promise<T>;
   } catch (reason) {
     if (timedOut) throw new Error("The BrainServe Connect service did not respond within 20 seconds. Please try again.");
@@ -952,12 +953,18 @@ export const brainServeApi = {
       body: JSON.stringify({ email, password }),
     });
   },
-  logout() {
-    if (!refreshToken) { setAccessToken(null); return Promise.resolve(); }
+  async logout() {
     const token = refreshToken;
-    return apiRequest<void>("/auth/logout", {
-      method: "POST", body: JSON.stringify({ refreshToken: token }),
-    }, false).finally(() => setAccessToken(null));
+    setAccessToken(null);
+    if (!token) return;
+    try {
+      await apiRequest<void>("/auth/logout", {
+        method: "POST", body: JSON.stringify({ refreshToken: token }), keepalive: true,
+      }, false);
+    } catch {
+      // Local credentials are already cleared. A disconnected backend must not
+      // prevent the user from ending the browser session.
+    }
   },
   requestPasswordChangeOtp(currentPassword: string) {
     return apiRequest<void>("/auth/change-password/request-otp", {

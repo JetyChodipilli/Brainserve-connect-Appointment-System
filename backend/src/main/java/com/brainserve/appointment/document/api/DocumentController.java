@@ -5,6 +5,8 @@ import com.brainserve.appointment.document.domain.StoredDocument;
 import jakarta.validation.constraints.Pattern;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,28 +32,34 @@ public class DocumentController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasAuthority('EMPLOYEE_DOCUMENT_WRITE')")
-    DocumentResponse upload(@RequestParam @Pattern(regexp = "EMPLOYEE|VISITOR") String ownerType,
+    DocumentResponse upload(@AuthenticationPrincipal Jwt jwt,
+                            @RequestParam @Pattern(regexp = "EMPLOYEE|VISITOR") String ownerType,
                             @RequestParam UUID ownerId,
                             @RequestParam @Pattern(regexp = "PHOTO|IDENTITY|EMPLOYMENT|OTHER") String category,
                             @RequestParam MultipartFile file) {
-        return DocumentResponse.from(service.upload(ownerType, ownerId, category, file));
+        return DocumentResponse.from(service.upload(actorId(jwt), ownerType, ownerId, category, file));
     }
 
     @GetMapping
     @PreAuthorize("hasAuthority('EMPLOYEE_DOCUMENT_READ')")
-    List<DocumentResponse> list(@RequestParam @Pattern(regexp = "EMPLOYEE|VISITOR") String ownerType,
+    List<DocumentResponse> list(@AuthenticationPrincipal Jwt jwt,
+                                @RequestParam @Pattern(regexp = "EMPLOYEE|VISITOR") String ownerType,
                                 @RequestParam UUID ownerId) {
-        return service.list(ownerType, ownerId).stream().map(DocumentResponse::from).toList();
+        return service.list(actorId(jwt), ownerType, ownerId).stream().map(DocumentResponse::from).toList();
     }
 
     @GetMapping("/{id}/download-url")
     @PreAuthorize("hasAuthority('EMPLOYEE_DOCUMENT_READ')")
-    DownloadResponse download(@PathVariable UUID id) { return new DownloadResponse(service.createDownloadUrl(id), Instant.now().plusSeconds(300)); }
+    DownloadResponse download(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return new DownloadResponse(service.createDownloadUrl(actorId(jwt), id), Instant.now().plusSeconds(300));
+    }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @PreAuthorize("hasAuthority('EMPLOYEE_DOCUMENT_WRITE')")
-    void delete(@PathVariable UUID id) { service.delete(id); }
+    void delete(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) { service.delete(actorId(jwt), id); }
+
+    private UUID actorId(Jwt jwt) { return UUID.fromString(jwt.getSubject()); }
 
     public record DocumentResponse(UUID id, String ownerType, UUID ownerId, String category, String filename,
                                    String contentType, long sizeBytes, String sha256, String status, Instant createdAt) {

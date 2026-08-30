@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
+import "@fontsource-variable/manrope/wght.css";
+import "@fontsource-variable/newsreader/wght.css";
 import "./globals.css";
+import "./professional-ui.css";
 
 export const metadata: Metadata = {
   title: "BrainServe Connect | Workplace Access",
@@ -11,13 +14,13 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({
-  children,
-}: Readonly<{
+                                     children,
+                                   }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+      <html lang="en">
       <body>{children}</body>
-    </html>
+      </html>
   );
 }
