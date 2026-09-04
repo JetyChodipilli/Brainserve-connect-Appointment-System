@@ -14,7 +14,7 @@ test("appointment cancellation requires the emailed OTP in a real browser flow",
   let cancellationOtpRequests = 0;
   let submittedOtp = "";
 
-  await page.route("http://backend.invalid/api/v1/**", async (route) => {
+  await page.route("http://127.0.0.1:8080/api/v1/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (path === "/api/v1/public/company-profile") {

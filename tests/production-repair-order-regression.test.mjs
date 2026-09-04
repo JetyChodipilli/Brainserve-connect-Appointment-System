@@ -259,6 +259,7 @@ test("browser tests cover explicit lock mode and backend-backed OTP cancellation
   const failClosed = read(
       "e2e/production-security.spec.ts",
   );
+  const backendConfig = read("playwright.backend.config.ts");
   const cancellation = read(
       "e2e-backend/appointment-cancellation.spec.ts",
   );
@@ -267,6 +268,8 @@ test("browser tests cover explicit lock mode and backend-backed OTP cancellation
       failClosed,
       /explicit lock mode fails closed when the backend URL is absent/,
   );
+  assert.match(backendConfig, /http:\/\/127\.0\.0\.1:8080\/api\/v1/);
+  assert.doesNotMatch(backendConfig, /backend\.invalid/);
   assert.match(
       cancellation,
       /Cancellation code sent/,
