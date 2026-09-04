@@ -40,7 +40,7 @@ test("Docker orchestration and executable verification cover the complete servic
     "clamav:", "mailpit:", "backend:", "frontend:",
   ]) assert.ok(compose.includes(`  ${service}`), `${service} must exist in Docker Compose`);
   for (const probe of [
-    "pg_isready", "redis-cli", "kafka-topics.sh", "clamdscan",
+    "pg_isready", "redis-cli", "kafka-topics.sh", "clamAvPing",
     "actuator/health/readiness", "minio/health/ready", "mailpit",
   ]) assert.ok(verifier.includes(probe), `${probe} must be part of stack verification`);
 });

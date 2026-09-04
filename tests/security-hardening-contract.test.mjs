@@ -70,6 +70,8 @@ test("the verified dependency graph is vulnerability-gated", () => {
     const packageJson = JSON.parse(read("package.json"));
     const workflow = read(".github/workflows/ci.yml");
     assert.equal(packageJson.overrides.postcss, "8.5.23");
-    assert.equal(packageJson.overrides["fast-uri"], "3.1.5");
+    assert.equal(packageJson.overrides.browserslist, "4.28.7");
+    assert.equal(packageJson.overrides["fast-uri"], "3.1.6");
+    assert.equal(packageJson.overrides.fflate, "0.7.5");
     assert.match(workflow, /npm audit --audit-level=high/);
 });
