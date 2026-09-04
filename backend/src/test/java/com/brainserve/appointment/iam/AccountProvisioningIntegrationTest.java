@@ -272,7 +272,7 @@ class AccountProvisioningIntegrationTest {
                         .header("Authorization", bearer(token))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(mapper.writeValueAsBytes(Map.of("code", code, "name", name))))
-                .andExpect(status().isOk())
+                .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         return mapper.readTree(response).required("id").asText();
     }
