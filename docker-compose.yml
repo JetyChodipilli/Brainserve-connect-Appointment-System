@@ -6,7 +6,7 @@ services:
     entrypoint: ["/bin/sh", "/opt/brainserve/postgres-entrypoint.sh"]
     environment:
       POSTGRES_DB: brainserve
-      POSTGRES_USER: brainserve
+      POSTGRES_USER: "${DB_USERNAME:-postgres}"
       POSTGRES_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD in .env}"
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -16,7 +16,7 @@ services:
     ports:
       - "127.0.0.1:5433:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U brainserve -d brainserve"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -28,7 +28,7 @@ services:
     environment:
       PGHOST: postgres
       PGPORT: 5432
-      PGUSER: brainserve
+      PGUSER: "${DB_USERNAME:-postgres}"
       PGPASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD in .env}"
       POSTGRES_BACKUP_INTERVAL_SECONDS: "${POSTGRES_BACKUP_INTERVAL_SECONDS:-86400}"
       POSTGRES_BACKUP_RETENTION_DAYS: "${POSTGRES_BACKUP_RETENTION_DAYS:-14}"
@@ -53,7 +53,7 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${REDIS_HOST_PORT:-6380}:6379"
     healthcheck:
       test:
         [
@@ -254,7 +254,7 @@ services:
     build: ./backend
     environment:
       DB_URL: jdbc:postgresql://postgres:5432/brainserve
-      DB_USERNAME: brainserve
+      DB_USERNAME: "${DB_USERNAME:-postgres}"
       DB_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD in .env}"
 
       REDIS_HOST: redis
@@ -321,8 +321,8 @@ services:
       S3_SECRET_KEY: "${S3_SECRET_KEY:?Set S3_SECRET_KEY in .env}"
       S3_PUBLIC_ENDPOINT: "${S3_PUBLIC_ENDPOINT:-http://localhost:9000}"
 
-      FRONTEND_PUBLIC_URL: "${FRONTEND_PUBLIC_URL:-http://localhost:3000}"
-      BRAIN_SERVE_ALLOWED_ORIGINS: "${BRAIN_SERVE_ALLOWED_ORIGINS:-http://localhost:3000}"
+      FRONTEND_PUBLIC_URL: "${DOCKER_FRONTEND_PUBLIC_URL:-http://localhost:3000}"
+      BRAIN_SERVE_ALLOWED_ORIGINS: "${DOCKER_ALLOWED_ORIGINS:-http://localhost:3000}"
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:

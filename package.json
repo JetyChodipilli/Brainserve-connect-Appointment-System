@@ -19,7 +19,12 @@
     "validate:artifact": "bash scripts/validate-artifact.sh",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate"
+    "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
+    "docker:infra": "docker compose --env-file backend/.env up -d postgres redis kafka kafka-2 kafka-3 kafka-init mailpit minio minio-init clamav",
+    "docker:retention": "docker compose --env-file backend/.env up -d postgres-backup",
+    "docker:full": "docker compose --env-file backend/.env --profile full-stack up --build -d",
+    "docker:status": "docker compose --env-file backend/.env ps -a",
+    "verify:infra": "node scripts/verify-stack.mjs --infra-only"
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "1.54.2",
@@ -67,3 +72,4 @@
     "sharp": "0.35.0"
   }
 }
+
