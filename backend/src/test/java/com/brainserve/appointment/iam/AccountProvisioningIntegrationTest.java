@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.time.LocalDate;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
@@ -67,14 +68,20 @@ class AccountProvisioningIntegrationTest {
     @Autowired ObjectMapper mapper;
     @MockitoBean  EmailService emailService;
     private final Map<String, String> pendingPasswords = new ConcurrentHashMap<>();
+    private final Map<String, String> pendingPasswordOtps = new ConcurrentHashMap<>();
 
     @BeforeEach
     void captureEmailedTemporaryPasswords() {
         pendingPasswords.clear();
+        pendingPasswordOtps.clear();
         doAnswer(invocation -> {
             pendingPasswords.put(invocation.getArgument(0), invocation.getArgument(3));
             return null;
         }).when(emailService).sendPendingAccountCreated(anyString(), anyString(), anyString(), anyString(), anyString());
+        doAnswer(invocation -> {
+            pendingPasswordOtps.put(invocation.getArgument(0), invocation.getArgument(2));
+            return null;
+        }).when(emailService).sendPasswordChangeOtp(anyString(), anyString(), anyString(), any());
     }
 
     @Test
@@ -89,7 +96,8 @@ class AccountProvisioningIntegrationTest {
                 .andExpect(jsonPath("$.status").value("ACTIVE"));
         verify(emailService).sendAccountApproved(eq("aarav.ceo@brainserve.in"), eq("Aarav CEO"),
                 eq("ROLE_CEO"), eq(SYSTEM_ADMIN_EMAIL));
-        String ceoToken = login("aarav.ceo@brainserve.in", ceo.password(), 200);
+        String ceoToken = completeRequiredPasswordChange(
+                "aarav.ceo@brainserve.in", ceo.password(), "AaravCeo!2026");
         mockMvc.perform(post("/api/admin/users")
                         .header("Authorization", bearer(systemAdminToken))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -279,12 +287,33 @@ class AccountProvisioningIntegrationTest {
         return mapper.readTree(result.getResponse().getContentAsString()).required("accessToken").asText();
     }
 
+    private String completeRequiredPasswordChange(String email, String temporaryPassword,
+                                                  String newPassword) throws Exception {
+        String temporaryToken = login(email, temporaryPassword, 200);
+        mockMvc.perform(post("/api/auth/change-password/request-otp")
+                        .header("Authorization", bearer(temporaryToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsBytes(new OtpRequest(temporaryPassword))))
+                .andExpect(status().isNoContent());
+
+        String otp = pendingPasswordOtps.get(email);
+        if (otp == null) throw new AssertionError("Password-change OTP email was not sent");
+        mockMvc.perform(post("/api/auth/change-password/confirm")
+                        .header("Authorization", bearer(temporaryToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsBytes(new ConfirmPasswordRequest(otp, newPassword))))
+                .andExpect(status().isNoContent());
+        return login(email, newPassword, 200);
+    }
+
     private String bearer(String token) { return "Bearer " + token; }
 
     private record LoginRequest(String email, String password) {}
     private record PrivilegedRequest(String fullName, String email, String role) {}
     private record RegistrationRequest(String fullName, String email, String password, String role) {}
     private record RejectRequest(String reason) {}
+    private record OtpRequest(String currentPassword) {}
+    private record ConfirmPasswordRequest(String otp, String newPassword) {}
     private record OnboardingRequest(String departmentId, String phoneNumber,
                                      String designation, LocalDate joiningDate) {}
     private record CreatedAccount(String id, String password) {}
