@@ -219,7 +219,10 @@ class AccountProvisioningIntegrationTest {
         String securityId = register("Sanjay Security", "sanjay.security@brainserve.in",
                 "Security!Pass2026", "ROLE_SECURITY", "PENDING_HR_APPROVAL");
         mockMvc.perform(post("/api/ceo/users/{id}/approve", securityId)
-                        .header("Authorization", bearer(ceoToken)))
+                        .header("Authorization", bearer(ceoToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsBytes(new OnboardingRequest(managerDepartmentId,
+                                "+91 90000 00004", "Security Officer", LocalDate.now()))))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.errorCode").value("INVALID_ACCOUNT_STATUS"));
         mockMvc.perform(post("/api/hr/users/{id}/reject", securityId)
