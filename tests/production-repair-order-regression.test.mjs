@@ -11,6 +11,7 @@ test("browser preview requires explicit opt-in and lock mode exposes no fixed OT
   const api = read("app/lib/api.ts");
   const app = read("app/brainserve-app.tsx");
   const frontendImage = read("Dockerfile.frontend");
+  const playwright = read("playwright.config.ts");
 
   assert.ok(
       sourceIncludes(
@@ -53,6 +54,9 @@ test("browser preview requires explicit opt-in and lock mode exposes no fixed OT
       frontendImage,
       /ARG NEXT_PUBLIC_API_BASE_URL=/,
   );
+  assert.match(playwright, /command: "npm exec vite --/);
+  assert.match(playwright, /NEXT_PUBLIC_API_BASE_URL: ""/);
+  assert.doesNotMatch(playwright, /command: "npm run dev:locked/);
 });
 
 test("browser preview exposes role workspaces without adding a hosted credential", () => {

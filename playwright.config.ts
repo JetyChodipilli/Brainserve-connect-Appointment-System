@@ -12,11 +12,15 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: "npm run dev:locked -- --host 127.0.0.1 --port 4173",
+    command: "npm exec vite -- --host 127.0.0.1 --port 4173",
     url: "http://127.0.0.1:4173",
     reuseExistingServer: false,
     timeout: 120_000,
-    env: { NEXT_PUBLIC_API_BASE_URL: "" },
+    env: {
+      BRAINSERVE_LOCAL_BACKEND: "1",
+      VITE_BRAINSERVE_LOCKED: "1",
+      NEXT_PUBLIC_API_BASE_URL: "",
+    },
   },
   projects: [
     {
@@ -41,4 +45,3 @@ export default defineConfig({
     },
   ],
 });
-
