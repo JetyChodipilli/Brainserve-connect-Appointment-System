@@ -15,7 +15,7 @@ export default defineConfig({
     url: "http://127.0.0.1:4174",
     reuseExistingServer: false,
     timeout: 120_000,
-    env: { NEXT_PUBLIC_API_BASE_URL: "http://backend.invalid/api/v1" },
+    env: { NEXT_PUBLIC_API_BASE_URL: "http://127.0.0.1:8080/api/v1" },
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 });

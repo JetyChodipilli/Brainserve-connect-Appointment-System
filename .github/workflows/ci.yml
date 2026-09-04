@@ -29,7 +29,21 @@ jobs:
         run: npm ci
 
       - name: Reject high-severity dependency vulnerabilities
-        run: npm audit --audit-level=high
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if npm audit --audit-level=high --fetch-timeout=60000 --fetch-retries=1; then
+              exit 0
+            fi
+
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::npm audit failed after three attempts"
+              exit 1
+            fi
+
+            echo "::warning::npm audit attempt $attempt failed; retrying"
+            sleep $((attempt * 10))
+          done
 
       - name: Type-check
         run: npm run typecheck
@@ -76,5 +90,7 @@ jobs:
 
       - name: Compile and test backend
         env:
+          ARCHIVE_ENCRYPTION_KEYS: v1=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          PII_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
           QR_PASS_SIGNING_SECRET: ci-only-qr-pass-signing-secret-at-least-thirty-two-characters
         run: mvn --batch-mode --no-transfer-progress clean verify

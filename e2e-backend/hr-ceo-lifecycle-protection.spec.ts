@@ -51,7 +51,7 @@ const pageOf = <T,>(content: T[]) => ({
 test("department HR sees the CEO but cannot change status or request termination", async ({ page }) => {
   let ceoLifecycleWriteAttempted = false;
 
-  await page.route("http://backend.invalid/api/v1/**", async (route) => {
+  await page.route("http://127.0.0.1:8080/api/v1/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
 
