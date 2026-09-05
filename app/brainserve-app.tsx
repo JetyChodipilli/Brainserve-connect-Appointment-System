@@ -3871,7 +3871,6 @@ function DashboardApp({ role, userEmail, onLogout }: { role: Role; userEmail: st
                                                       approvedRecovery={approvedRecovery} onApprovedRecoveryChange={setApprovedRecovery}
                                                       onRoleAssignmentChanged={refreshRoleAssignments}
                                                       onAddEmployee={() => { setOperationError(""); setEmployeeAccountId(undefined); setEmployeeDepartmentId(undefined); setEmployeeModal(true); }}
-                                                      onAssignTeamLead={assignTeamLead}
                                                       onCreate={createStaffAccount} onChangeEmail={changeStaffEmail} onResetPassword={resetStaffPassword}
                                                       onSetEnabled={setStaffEnabled} onUpdatePermissions={updateStaffPermissions} />}
             </div>
@@ -7866,6 +7865,20 @@ function OrganizationView({ role, userEmail, departments, employees, staffAccoun
             const hrAccount = hrAssignment ? staffAccounts.find((item) => item.userId === hrAssignment.hrUserId) : undefined;
             const managerAssignment = managerAssignments.find((item) => item.departmentId === department.id && item.active);
             const managerAccount = managerAssignment ? staffAccounts.find((item) => item.userId === managerAssignment.managerUserId) : undefined;
+            const activeLeadEmployeeIds = new Set(teamLeadAssignments.filter((item) => item.active)
+                .map((item) => item.teamLeadEmployeeId));
+            const eligibleLeadEmployees = roster.filter((employee) => {
+                const employeeId = employee.uuid ?? employee.id;
+                const account = staffAccounts.find((item) => item.employeeId === employeeId
+                    || item.email.toLowerCase() === employee.email.toLowerCase());
+                return department.active
+                    && employee.status === "Active"
+                    && !activeLeadEmployeeIds.has(employeeId)
+                    && account?.enabled
+                    && account.status === "ACTIVE"
+                    && account.roles.length === 1
+                    && account.roles[0] === "ROLE_EMPLOYEE";
+            });
             return <article className={`org-card glass-panel${expanded ? " expanded" : ""}`} key={department.id}>
                 <div className="org-card-head"><span className="dept-icon"><DepartmentLogo department={department} /></span>
                     <span className="org-status"><i className={department.active ? "active" : ""} />{department.active ? "Active" : "Inactive"}</span></div>
@@ -7910,15 +7923,20 @@ function OrganizationView({ role, userEmail, departments, employees, staffAccoun
                             Next <ArrowRight size={15} />
                         </button>
                     </div>}
-                    {canManageLead && !routingDepartment && <form className="team-lead-assignment" onSubmit={(event) => {
-                        event.preventDefault(); const data = new FormData(event.currentTarget);
-                        void onAssignTeamLead(department.id, String(data.get("employeeId")));
+                    {canManageLead && department.active && <form className="team-lead-assignment" onSubmit={(event) => {
+                        event.preventDefault(); const form = event.currentTarget; const data = new FormData(form);
+                        const employeeId = String(data.get("employeeId"));
+                        const employee = eligibleLeadEmployees.find((item) => (item.uuid ?? item.id) === employeeId);
+                        void onAssignTeamLead(department.id, employeeId).then((assigned) => {
+                            if (!assigned) return;
+                            setMessage(`${employee?.name ?? "Employee"} now has Team Lead access for ${department.name}. Their existing login credentials remain unchanged.`);
+                            form.reset();
+                        });
                     }}><label>{leadAssignment ? "Replace Team Lead" : "Assign Team Lead"}<select name="employeeId" required defaultValue="">
-                        <option value="" disabled>Select an active department employee</option>
-                        {roster.filter((item) => item.status === "Active"
-                            && (item.uuid ?? item.id) !== leadAssignment?.teamLeadEmployeeId)
+                        <option value="" disabled>{eligibleLeadEmployees.length ? "Select an approved Employee account" : "No eligible Employee accounts"}</option>
+                        {eligibleLeadEmployees
                             .map((item) => <option key={item.uuid ?? item.id} value={item.uuid ?? item.id}>{item.name} · {item.role}</option>)}
-                    </select><small>{roster.length} member{roster.length === 1 ? "" : "s"} on this page. Search by name, employee ID or email to find another eligible employee.</small></label><button className="button button-primary"><BadgeCheck size={15} /> {leadAssignment ? "Replace lead" : "Assign lead"}</button>
+                    </select><small>Only enabled, approved Employee accounts are eligible. Search by name, employee ID or email to find another employee.</small></label><button className="button button-primary" disabled={eligibleLeadEmployees.length === 0}><BadgeCheck size={15} /> {leadAssignment ? "Replace lead" : "Assign lead"}</button>
                         {leadAssignment && <button type="button" className="button button-reject" onClick={() => void onEndTeamLead(leadAssignment)}>End assignment</button>}</form>}
                     {canManageHr && <form className="team-lead-assignment" onSubmit={(event) => {
                         event.preventDefault(); const data = new FormData(event.currentTarget);
@@ -10046,7 +10064,7 @@ function ManagerDepartmentAssignmentPanel({ departments, assignments, onChanged 
     </article>;
 }
 
-function SettingsView({ role, userEmail, accounts, departments, employees, teamLeadAssignments, onAddEmployee, onAssignTeamLead,
+function SettingsView({ role, userEmail, accounts, departments, employees, teamLeadAssignments, onAddEmployee,
                           departmentHrAssignments, managerAssignments, approvedRecovery, onApprovedRecoveryChange,
                           onRoleAssignmentChanged,
                           onCreate, onChangeEmail, onResetPassword, onSetEnabled, onUpdatePermissions }: {
@@ -10057,7 +10075,6 @@ function SettingsView({ role, userEmail, accounts, departments, employees, teamL
     onApprovedRecoveryChange: (request: AccountRecoveryRequest | null) => void;
     onRoleAssignmentChanged: () => Promise<void>;
     onAddEmployee: () => void;
-    onAssignTeamLead: (departmentId: string, employeeId: string) => Promise<boolean>;
     onCreate: (email: string, password: string, role: string) => Promise<void>;
     onChangeEmail: (userId: string, email: string) => Promise<void>;
     onResetPassword: (userId: string, password: string) => Promise<void>;
@@ -10070,11 +10087,6 @@ function SettingsView({ role, userEmail, accounts, departments, employees, teamL
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
     const [busyKey, setBusyKey] = useState("");
-    const [teamLeadDepartmentId, setTeamLeadDepartmentId] = useState("");
-    const [teamLeadQuery, setTeamLeadQuery] = useState("");
-    const [teamLeadCandidates, setTeamLeadCandidates] = useState<Employee[]>([]);
-    const [teamLeadCandidatesLoading, setTeamLeadCandidatesLoading] = useState(false);
-    const [teamLeadCandidatesError, setTeamLeadCandidatesError] = useState("");
     const [managedAccounts, setManagedAccounts] = useState<StaffAccount[]>(accounts);
     const [managedAccountPage, setManagedAccountPage] = useState(0);
     const [managedAccountTotalPages, setManagedAccountTotalPages] = useState(1);
@@ -10134,43 +10146,6 @@ function SettingsView({ role, userEmail, accounts, departments, employees, teamL
         return () => window.clearTimeout(timer);
     }, [loadManagedAccounts, role]);
 
-    const loadTeamLeadCandidates = useCallback(async (departmentId: string, query = "") => {
-        if (!departmentId) { setTeamLeadCandidates([]); setTeamLeadCandidatesError(""); setError(""); return; }
-        setTeamLeadCandidatesLoading(true);
-        setTeamLeadCandidatesError("");
-        setError("");
-        try {
-            const department = departments.find((item) => item.id === departmentId);
-            if (isBackendConfigured) {
-                const page = await brainServeApi.employeePage({
-                    departmentId, query, status: "ACTIVE", page: 0, size: 50, sort: "displayName,asc",
-                });
-                setTeamLeadCandidates(page.content.map((employee) => ({
-                    id: employee.employeeNumber, uuid: employee.id, departmentId: employee.departmentId,
-                    name: employee.displayName, initials: visitorInitials(employee.displayName),
-                    role: employee.designation, department: department?.name ?? "Department",
-                    email: employee.officialEmail, status: employeeStatusLabel(employee.status),
-                })));
-            } else {
-                setTeamLeadCandidates(employees.filter((employee) => employee.status === "Active"
-                    && employee.departmentId === departmentId
-                    && (!query || `${employee.name} ${employee.id} ${employee.email}`.toLowerCase()
-                        .includes(query.toLowerCase()))).slice(0, 50));
-            }
-        } catch (reason) {
-            setTeamLeadCandidates([]);
-            const message = reason instanceof Error ? reason.message : "Team Lead candidates could not be loaded.";
-            setTeamLeadCandidatesError(message);
-            setError(message);
-        } finally { setTeamLeadCandidatesLoading(false); }
-    }, [departments, employees]);
-
-    useEffect(() => {
-        if (!isBackendConfigured || !teamLeadDepartmentId) return;
-        const timer = window.setTimeout(() => void loadTeamLeadCandidates(teamLeadDepartmentId), 0);
-        return () => window.clearTimeout(timer);
-    }, [loadTeamLeadCandidates, teamLeadDepartmentId]);
-
     const updateSetting = async (key: string, value: string) => {
         setBusyKey(key); setError(""); setMessage("");
         try {
@@ -10193,46 +10168,6 @@ function SettingsView({ role, userEmail, accounts, departments, employees, teamL
             form.reset(); setMessage("Access-only login created and sent to the HR Admin approval queue.");
         } catch (reason) { setError(reason instanceof ApiError ? reason.message : "The staff account could not be created."); }
     };
-
-    const assignTeamLeadAccess = async (event: FormEvent<HTMLFormElement>) => {
-        event.preventDefault(); setError(""); setMessage("");
-        const form = event.currentTarget; const data = new FormData(form);
-        const departmentId = String(data.get("departmentId"));
-        const employeeId = String(data.get("employeeId"));
-        if (!departmentId || !employeeId) { setError("Select an active department and an approved employee login."); return; }
-        setBusyKey("team-lead-assignment");
-        try {
-            const assigned = await onAssignTeamLead(departmentId, employeeId);
-            if (assigned) {
-                const employee = [...teamLeadCandidates, ...employees]
-                    .find((item) => (item.uuid ?? item.id) === employeeId);
-                const department = departments.find((item) => item.id === departmentId);
-                setMessage(`${employee?.name ?? "Employee"} now has Team Lead access for ${department?.name ?? "the selected department"}. Their existing login credentials remain unchanged.`);
-                form.reset(); setTeamLeadDepartmentId(""); setTeamLeadCandidates([]); setTeamLeadQuery("");
-            }
-        } catch (reason) { setError(reason instanceof Error ? reason.message : "Team Lead access could not be created."); }
-        finally { setBusyKey(""); }
-    };
-
-    const activeLeadEmployeeIds = new Set(teamLeadAssignments.filter((item) => item.active)
-        .map((item) => item.teamLeadEmployeeId));
-    const currentAccount = accounts.find((account) => account.email.toLowerCase() === userEmail.toLowerCase());
-    const currentHrUserId = currentAccount?.userId ?? (!isBackendConfigured
-        ? readDemoAccounts().find((account) => account.email.toLowerCase() === userEmail.toLowerCase())?.id
-        : undefined);
-    const assignedHrDepartmentId = role === "HR Admin" ? departmentHrAssignments
-        .find((assignment) => assignment.active && assignment.hrUserId === currentHrUserId)?.departmentId : undefined;
-    const assignableTeamLeadDepartments = departments.filter((department) => department.active
-        && (role !== "HR Admin" || department.id === assignedHrDepartmentId));
-    const selectedTeamLeadDepartment = departments.find((department) => department.id === teamLeadDepartmentId);
-    const candidatePool = isBackendConfigured || teamLeadCandidates.length || teamLeadQuery
-        ? teamLeadCandidates : employees;
-    const selectedDepartmentEmployees = selectedTeamLeadDepartment
-        ? candidatePool.filter((employee) => belongsToDepartment(employee, selectedTeamLeadDepartment)) : [];
-    const eligibleTeamLeadEmployees = candidatePool.filter((employee) => employee.status === "Active"
-        && Boolean(employee.uuid ?? employee.id)
-        && !activeLeadEmployeeIds.has(employee.uuid ?? employee.id)
-        && (!selectedTeamLeadDepartment || belongsToDepartment(employee, selectedTeamLeadDepartment)));
 
     const changeOwnEmail = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault(); setError(""); setMessage("");
@@ -10258,18 +10193,6 @@ function SettingsView({ role, userEmail, accounts, departments, employees, teamL
                 {role === "HR Admin" ? <>
                     <article className="panel glass-panel"><div className="panel-heading"><div><span>CREATE EMPLOYEE</span><h2>Employee profile and department</h2><p>Create the employee profile, assign the HR Admin&apos;s department and generate the employee ID in one flow.</p></div><Building2 size={22} /></div><div className="team-lead-access-note"><BadgeCheck size={17} /><span><strong>Department assignment is mandatory</strong><small>The employee form includes department, designation and joining date. If HR manages one department, it is selected automatically.</small></span></div><button type="button" className="button button-primary" onClick={onAddEmployee} disabled={!departments.some((item) => item.active)}><UserPlus size={16} /> Add employee &amp; assign department</button>{!departments.some((item) => item.active) && <div className="login-error" role="alert">No active department is available. Ask the CEO or System Admin to assign this HR Admin to a department.</div>}</article>
                     <article className="panel glass-panel"><div className="panel-heading"><div><span>CREATE ACCESS-ONLY LOGIN</span><h2>Receptionist or Security</h2><p>These roles do not belong to an employee department. Each login remains pending until an HR Admin approves it.</p></div></div><form className="staff-create-form" onSubmit={create}><label>Company email<input name="email" type="email" placeholder="name@brainserve.in" required /></label><label>Temporary password<input name="password" type="password" minLength={12} placeholder="Minimum 12 characters" required /></label><label>Role<select name="role">{allowedRoles.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><button className="button button-primary"><UserPlus size={16} /> Create login</button></form></article>
-                    <article className="panel glass-panel team-lead-access-card"><div className="panel-heading"><div><span>CREATE TEAM LEAD ACCESS</span><h2>Promote an approved employee</h2><p>A Team Lead keeps their existing company email and password. HR assigns one active employee login to one department.</p></div><BadgeCheck size={22} /></div>
-                        <div className="team-lead-access-note"><ShieldCheck size={17} /><span><strong>Employees only — Security and Receptionist are excluded</strong><small>Only an active, approved Employee login from the selected department can appear here. Promotion revokes existing refresh sessions and the next sign-in opens Team Lead access for that department.</small></span></div>
-                        <form className="staff-create-form team-lead-access-form" onSubmit={assignTeamLeadAccess}>
-                            <label>Department<select name="departmentId" value={teamLeadDepartmentId} onChange={(event) => { setTeamLeadDepartmentId(event.target.value); setTeamLeadCandidates([]); setTeamLeadCandidatesError(""); setError(""); setTeamLeadQuery(""); }} required disabled={assignableTeamLeadDepartments.length === 0}><option value="">{assignableTeamLeadDepartments.length ? "Select your assigned department" : "No HR department assignment"}</option>{assignableTeamLeadDepartments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}</select></label>
-                            <label>Find approved Employee<div className="directory-search-row"><input value={teamLeadQuery} onChange={(event) => setTeamLeadQuery(event.target.value)} placeholder="Name, employee ID or company email" /><button type="button" className="button button-secondary" disabled={!teamLeadDepartmentId || teamLeadCandidatesLoading} onClick={() => void loadTeamLeadCandidates(teamLeadDepartmentId, teamLeadQuery)}><Search size={15} />{teamLeadCandidatesLoading ? "Searching…" : "Search"}</button></div></label>
-                            <label>Approved Employee login<select name="employeeId" defaultValue="" key={`${teamLeadDepartmentId}:${teamLeadQuery}`} required disabled={teamLeadCandidatesLoading || Boolean(teamLeadCandidatesError)}><option value="">{teamLeadCandidatesLoading ? "Loading eligible employees…" : teamLeadCandidatesError ? "Employee list could not be loaded" : eligibleTeamLeadEmployees.length ? "Select an Employee in this department" : teamLeadCandidates.length ? "All active employees are already Team Leads" : "No active employees in this department"}</option>{eligibleTeamLeadEmployees.map((employee) => <option value={employee.uuid ?? employee.id} key={employee.uuid ?? employee.id}>{employee.name} · Employee · {employee.department}</option>)}</select></label>
-                            {teamLeadCandidatesError && <div className="login-error" role="alert">{teamLeadCandidatesError}</div>}
-                            <button className="button button-primary" disabled={busyKey === "team-lead-assignment" || !teamLeadDepartmentId || eligibleTeamLeadEmployees.length === 0 || Boolean(teamLeadCandidatesError)}><BadgeCheck size={16} /> {busyKey === "team-lead-assignment" ? "Creating access…" : "Create Team Lead access"}</button>
-                        </form>
-                        {selectedTeamLeadDepartment && <div className="team-lead-readiness"><Users size={16} /><span><strong>{selectedDepartmentEmployees.length} matching member{selectedDepartmentEmployees.length === 1 ? "" : "s"} · {eligibleTeamLeadEmployees.length} available for validation</strong><small>The backend confirms the selected employee has an active approved Employee login in your department before promotion.</small></span></div>}
-                        <div className="active-team-lead-list">{teamLeadAssignments.filter((item) => item.active).map((assignment) => { const department = departments.find((item) => item.id === assignment.departmentId); const employee = employees.find((item) => (item.uuid ?? item.id) === assignment.teamLeadEmployeeId); return <span key={assignment.id}><BadgeCheck size={14} /><strong>{department?.name ?? "Department"}</strong><small>{employee?.name ?? "Assigned Team Lead"}</small></span>; })}{teamLeadAssignments.every((item) => !item.active) && <small>No Team Lead assignments yet.</small>}</div>
-                    </article>
                     <article className="panel glass-panel"><div className="panel-heading"><div><span>MANAGED ACCOUNTS</span><h2>HR staff directory</h2><p>Search and manage one bounded department page at a time. Pending accounts must still use the HR approval action.</p></div><b>{managedAccountTotal.toLocaleString("en-IN")}</b></div>
                         <form className="inline-account-form" onSubmit={(event) => { event.preventDefault(); void loadManagedAccounts(0, managedAccountQuery); }}>
                             <label>Find account<input value={managedAccountQuery} onChange={(event) => setManagedAccountQuery(event.target.value)} placeholder="Name or company email" /></label>

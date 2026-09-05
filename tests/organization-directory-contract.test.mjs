@@ -96,8 +96,10 @@ test("Team Lead candidates are searchable and backend validated after HR approva
   assert.ok(app.includes("await onDecision?.()"));
   assert.ok(app.includes("setStaffAccounts(await brainServeApi.staffAccounts())"));
   assert.ok(app.includes('account.roles.length === 1 && account.roles[0] === "ROLE_EMPLOYEE"'));
-  assert.ok(app.includes("loadTeamLeadCandidates"));
-  assert.ok(app.includes("The backend confirms the selected employee has an active approved Employee login"));
+  assert.ok(app.includes("eligibleLeadEmployees"));
+  assert.ok(app.includes("canManageLead && department.active"));
+  assert.ok(app.includes("Only enabled, approved Employee accounts are eligible"));
+  assert.ok(!app.includes("canManageLead && !routingDepartment"));
   assert.ok(app.includes("Search by name, employee ID or email"));
 });
 
@@ -122,4 +124,3 @@ test("department assignment accepts registered employees with a single name and 
   assert.ok(app.includes('initialDepartmentId={employeeDepartmentId} error={operationError}'));
   assert.ok(app.includes('{error && <div className="login-error" role="alert">{error}</div>}'));
 });
-

@@ -36,22 +36,24 @@ test("HR manages assignments while CEO has read-only visibility", () => {
   assert.ok(api.includes("endTeamLeadAssignment"));
   assert.ok(frontend.includes("Assign Team Lead"));
   assert.ok(frontend.includes("Replace Team Lead"));
-  assert.ok(frontend.includes("CREATE TEAM LEAD ACCESS"));
-  assert.ok(frontend.includes("eligibleTeamLeadEmployees"));
-  assert.ok(frontend.includes("loadTeamLeadCandidates"));
+  assert.ok(frontend.includes("canManageLead && department.active"));
+  assert.ok(frontend.includes("eligibleLeadEmployees"));
   assert.ok(assignment.includes("TEAM_LEAD_ASSIGNMENT_DEPARTMENT_SCOPE_DENIED"));
   assert.ok(identity.includes("promoteActiveEmployee"));
 });
 
-test("Team Lead access is a visible HR promotion flow, not an unscoped staff registration", () => {
-  assert.ok(frontend.includes("Promote an approved employee"));
+test("Team Lead access is managed once in Organization, not duplicated in Settings or registration", () => {
+  assert.ok(!frontend.includes("Promote an approved employee"));
+  assert.ok(!frontend.includes("CREATE TEAM LEAD ACCESS"));
   assert.ok(frontend.includes("Their existing login credentials remain unchanged"));
   assert.ok(sourceIncludes(frontend, 'const allowedRoles = [["ROLE_RECEPTIONIST", "Receptionist"], ["ROLE_SECURITY", "Security"]]'));
   assert.ok(!sourceIncludes(frontend, 'const allowedRoles = [["ROLE_EMPLOYEE"'));
   assert.ok(!sourceIncludes(frontend, 'const allowedRoles = [["ROLE_TEAM_LEAD"'));
   assert.ok(frontend.includes('["ROLE_TEAM_LEAD", "ROLE_EMPLOYEE", "ROLE_RECEPTIONIST", "ROLE_SECURITY"]'));
   assert.ok(frontend.includes("Receptionist and Security accounts are never eligible"));
-  assert.ok(frontend.includes("Employees only — Security and Receptionist are excluded"));
+  assert.ok(frontend.includes("Only enabled, approved Employee accounts are eligible"));
+  assert.ok(frontend.includes('account.roles[0] === "ROLE_EMPLOYEE"'));
+  assert.ok(!frontend.includes("canManageLead && !routingDepartment"));
   assert.ok(assignment.includes("requireActiveEmployee"));
   assert.ok(employeeDirectory.includes("requireActiveEmployee"));
   assert.ok(identity.includes("revokeAllForUser"));
