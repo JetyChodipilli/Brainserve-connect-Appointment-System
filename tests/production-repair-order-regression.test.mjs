@@ -11,6 +11,8 @@ test("browser preview requires explicit opt-in and lock mode exposes no fixed OT
   const api = read("app/lib/api.ts");
   const app = read("app/brainserve-app.tsx");
   const frontendImage = read("Dockerfile.frontend");
+  const packageJson = JSON.parse(read("package.json"));
+  const playwrightConfig = read("playwright.config.ts");
 
   assert.ok(
       sourceIncludes(
@@ -52,6 +54,18 @@ test("browser preview requires explicit opt-in and lock mode exposes no fixed OT
   assert.doesNotMatch(
       frontendImage,
       /ARG NEXT_PUBLIC_API_BASE_URL=/,
+  );
+  assert.match(
+      packageJson.scripts["dev:locked"],
+      /VITE_BRAINSERVE_LOCKED=1 NEXT_PUBLIC_API_BASE_URL= vite/,
+  );
+  assert.doesNotMatch(
+      packageJson.scripts["dev:locked"],
+      /NEXT_PUBLIC_API_BASE_URL=https?:\/\//,
+  );
+  assert.match(
+      playwrightConfig,
+      /env: \{ NEXT_PUBLIC_API_BASE_URL: "" \}/,
   );
 });
 
