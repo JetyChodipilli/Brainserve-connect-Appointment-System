@@ -57,11 +57,11 @@ test("department HR sees the CEO but cannot change status or request termination
 
     if (path === "/api/v1/public/company-profile") {
       await route.fulfill({ json: {
-        name: "BrainServe Private Limited",
-        emailDomain: "brainserve.in",
-        hqAddress: "Hyderabad, Telangana, India",
-        supportEmail: "support@brainserve.in",
-      } });
+          name: "BrainServe Private Limited",
+          emailDomain: "brainserve.in",
+          hqAddress: "Hyderabad, Telangana, India",
+          supportEmail: "support@brainserve.in",
+        } });
       return;
     }
     if (path === "/api/v1/public/hosts") {
@@ -70,41 +70,41 @@ test("department HR sees the CEO but cannot change status or request termination
     }
     if (path === "/api/v1/auth/login" && request.method() === "POST") {
       await route.fulfill({ json: {
-        accessToken: "hr-access-token",
-        refreshToken: "hr-refresh-token",
-        forcePasswordChange: false,
-      } });
+          accessToken: "hr-access-token",
+          refreshToken: "hr-refresh-token",
+          forcePasswordChange: false,
+        } });
       return;
     }
     if (path === "/api/v1/auth/me") {
       await route.fulfill({ json: {
-        userId: hrUserId,
-        employeeId: hrEmployeeId,
-        email: "hr.tech@brainserve.in",
-        roles: ["ROLE_HR_ADMIN"],
-        permissions: ["EMPLOYEE_READ", "EMPLOYEE_STATUS_CHANGE"],
-        forcePasswordChange: false,
-      } });
+          userId: hrUserId,
+          employeeId: hrEmployeeId,
+          email: "hr.tech@brainserve.in",
+          roles: ["ROLE_HR_ADMIN"],
+          permissions: ["EMPLOYEE_READ", "EMPLOYEE_STATUS_CHANGE"],
+          forcePasswordChange: false,
+        } });
       return;
     }
     if (path === "/api/v1/profile/me") {
       await route.fulfill({ json: {
-        userId: hrUserId,
-        employeeId: hrEmployeeId,
-        fullName: "Technology HR",
-        email: "hr.tech@brainserve.in",
-        roles: ["ROLE_HR_ADMIN"],
-        employeeNumber: "BSPL-TECH-HR01",
-        designation: "HR Admin",
-        employeeStatus: "ACTIVE",
-        departmentId,
-        departmentCode: "TECH",
-        departmentName: "Technology",
-        departmentActive: true,
-        photoDocumentId: null,
-        photoUrl: null,
-        photoUrlExpiresAt: null,
-      } });
+          userId: hrUserId,
+          employeeId: hrEmployeeId,
+          fullName: "Technology HR",
+          email: "hr.tech@brainserve.in",
+          roles: ["ROLE_HR_ADMIN"],
+          employeeNumber: "BSPL-TECH-HR01",
+          designation: "HR Admin",
+          employeeStatus: "ACTIVE",
+          departmentId,
+          departmentCode: "TECH",
+          departmentName: "Technology",
+          departmentActive: true,
+          photoDocumentId: null,
+          photoUrl: null,
+          photoUrlExpiresAt: null,
+        } });
       return;
     }
     if (path === "/api/v1/employees") {
@@ -113,14 +113,14 @@ test("department HR sees the CEO but cannot change status or request termination
     }
     if (path === "/api/v1/departments/visible") {
       await route.fulfill({ json: [
-        { id: departmentId, code: "TECH", name: "Technology", active: true, version: 1 },
-      ] });
+          { id: departmentId, code: "TECH", name: "Technology", active: true, version: 1 },
+        ] });
       return;
     }
     if (path === "/api/v1/employees/department-summary") {
       await route.fulfill({ json: [
-        { departmentId, totalEmployees: 2, activeEmployees: 2, onLeaveEmployees: 0, onboardingEmployees: 0 },
-      ] });
+          { departmentId, totalEmployees: 2, activeEmployees: 2, onLeaveEmployees: 0, onboardingEmployees: 0 },
+        ] });
       return;
     }
     if (path === "/api/v1/team-leads/assignments"
@@ -133,18 +133,18 @@ test("department HR sees the CEO but cannot change status or request termination
       // This endpoint intentionally excludes CEO accounts. The employee API's
       // lifecycleProtected flag must still protect Jety's row.
       await route.fulfill({ json: pageOf([{
-        userId: "66666666-6666-4666-8666-666666666666",
-        employeeId,
-        fullName: "Asha Employee",
-        email: "asha@brainserve.in",
-        roles: ["ROLE_EMPLOYEE"],
-        enabled: true,
-        forcePasswordChange: false,
-        status: "ACTIVE",
-        grantedPermissions: [],
-        deniedPermissions: [],
-        effectivePermissions: ["EMPLOYEE_READ"],
-      }]) });
+          userId: "66666666-6666-4666-8666-666666666666",
+          employeeId,
+          fullName: "Asha Employee",
+          email: "asha@brainserve.in",
+          roles: ["ROLE_EMPLOYEE"],
+          enabled: true,
+          forcePasswordChange: false,
+          status: "ACTIVE",
+          grantedPermissions: [],
+          deniedPermissions: [],
+          effectivePermissions: ["EMPLOYEE_READ"],
+        }]) });
       return;
     }
     if (path === "/api/v1/appointments") {
@@ -153,12 +153,12 @@ test("department HR sees the CEO but cannot change status or request termination
     }
     if (path === "/api/v1/dashboard/summary") {
       await route.fulfill({ json: {
-        awaitingApproval: 0,
-        activeVisits: 0,
-        visitorsInside: 0,
-        totalEmployees: 2,
-        activeEmployees: 2,
-      } });
+          awaitingApproval: 0,
+          activeVisits: 0,
+          visitorsInside: 0,
+          totalEmployees: 2,
+          activeEmployees: 2,
+        } });
       return;
     }
     if (path === "/api/v1/realtime/stream") {
@@ -166,13 +166,13 @@ test("department HR sees the CEO but cannot change status or request termination
       return;
     }
     if ((path === `/api/v1/employees/${ceoEmployeeId}/status`
-        || path === "/api/v1/employee-terminations")
+            || path === "/api/v1/employee-terminations")
         && request.method() !== "GET") {
       ceoLifecycleWriteAttempted = true;
       await route.fulfill({ status: 403, json: {
-        errorCode: "CEO_LIFECYCLE_PROTECTED",
-        detail: "Department HR cannot change the CEO lifecycle.",
-      } });
+          errorCode: "CEO_LIFECYCLE_PROTECTED",
+          detail: "Department HR cannot change the CEO lifecycle.",
+        } });
       return;
     }
     await route.fulfill({ status: 404, json: { detail: `Unhandled test request: ${path}` } });
@@ -182,7 +182,18 @@ test("department HR sees the CEO but cannot change status or request termination
   await page.getByRole("button", { name: "Staff login" }).click();
   await page.getByLabel("Login email").fill("hr.tech@brainserve.in");
   await page.getByLabel("Password").fill("StrongPass!2026");
-  await page.getByRole("button", { name: "Sign in securely" }).click();
+  const loginResponse = page.waitForResponse((response) =>
+      response.url() === "http://backend.invalid/api/v1/auth/login"
+      && response.request().method() === "POST");
+  const profileResponse = page.waitForResponse((response) =>
+      response.url() === "http://backend.invalid/api/v1/auth/me");
+  const [login, profile] = await Promise.all([
+    loginResponse,
+    profileResponse,
+    page.getByRole("button", { name: "Sign in securely" }).click(),
+  ]);
+  expect(login.status()).toBe(200);
+  expect(profile.status()).toBe(200);
   await page.getByRole("button", { name: "Employees" }).click();
 
   const ceoRow = page.locator(".employee-table.table-row").filter({ hasText: "Jety CEO" });

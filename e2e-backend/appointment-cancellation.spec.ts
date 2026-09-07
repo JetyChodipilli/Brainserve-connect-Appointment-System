@@ -19,11 +19,11 @@ test("appointment cancellation requires the emailed OTP in a real browser flow",
     const path = new URL(request.url()).pathname;
     if (path === "/api/v1/public/company-profile") {
       await route.fulfill({ json: {
-        name: "BrainServe Private Limited",
-        emailDomain: "brainserve.in",
-        hqAddress: "Hyderabad, Telangana, India",
-        supportEmail: "support@brainserve.in",
-      } });
+          name: "BrainServe Private Limited",
+          emailDomain: "brainserve.in",
+          hqAddress: "Hyderabad, Telangana, India",
+          supportEmail: "support@brainserve.in",
+        } });
       return;
     }
     if (path === "/api/v1/public/hosts") {
@@ -54,7 +54,14 @@ test("appointment cancellation requires the emailed OTP in a real browser flow",
   await page.goto("/");
   await page.getByRole("button", { name: "Track appointment" }).click();
   await page.getByLabel("Tracking reference").fill(appointment.referenceNumber);
-  await page.getByRole("button", { name: "Track", exact: true }).click();
+  const trackedResponse = page.waitForResponse((response) =>
+      response.url() === `http://backend.invalid/api/v1/public/appointments/${appointment.referenceNumber}`
+      && response.request().method() === "GET");
+  const [tracking] = await Promise.all([
+    trackedResponse,
+    page.getByRole("button", { name: "Track", exact: true }).click(),
+  ]);
+  expect(tracking.status()).toBe(200);
   await expect(page.getByText(appointment.referenceNumber)).toBeVisible();
 
   await page.getByRole("button", { name: "Cancel appointment" }).click();

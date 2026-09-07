@@ -15,7 +15,11 @@ export default defineConfig({
     url: "http://127.0.0.1:4174",
     reuseExistingServer: false,
     timeout: 120_000,
-    env: { NEXT_PUBLIC_API_BASE_URL: "http://backend.invalid/api/v1" },
+    env: {
+      BRAINSERVE_LOCAL_BACKEND: "1",
+      VITE_BRAINSERVE_LOCKED: "0",
+      NEXT_PUBLIC_API_BASE_URL: "http://backend.invalid/api/v1",
+    },
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 });
