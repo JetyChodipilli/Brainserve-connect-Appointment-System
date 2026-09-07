@@ -7618,6 +7618,20 @@ function OrganizationView({ role, userEmail, departments, employees, staffAccoun
     const [loadingDepartment, setLoadingDepartment] = useState<string>();
     const [rosters, setRosters] = useState<Record<string, DepartmentRosterPage>>({});
     const [backendVisibleDepartments, setBackendVisibleDepartments] = useState<Department[]>([]);
+    const [leadership, setLeadership] = useState<Awaited<ReturnType<typeof brainServeApi.departmentLeadership>>>([]);
+    const [leadershipStatus, setLeadershipStatus] = useState<"loading" | "ready" | "error">("loading");
+    useEffect(() => {
+        if (!isBackendConfigured) return;
+        let active = true;
+        void Promise.resolve().then(() => {
+            if (!active) return;
+            setLeadershipStatus("loading");
+            return brainServeApi.departmentLeadership();
+        }).then((items) => {
+            if (active && items) { setLeadership(items); setLeadershipStatus("ready"); }
+        }).catch(() => { if (active) setLeadershipStatus("error"); });
+        return () => { active = false; };
+    }, [role, userEmail, departments, teamLeadAssignments, departmentHrAssignments, managerAssignments]);
     const [executiveDepartmentId, setExecutiveDepartmentId] = useState("");
     const [executiveBusy, setExecutiveBusy] = useState(false);
     const [message, setMessage] = useState("");
@@ -7865,6 +7879,14 @@ function OrganizationView({ role, userEmail, departments, employees, staffAccoun
             const hrAccount = hrAssignment ? staffAccounts.find((item) => item.userId === hrAssignment.hrUserId) : undefined;
             const managerAssignment = managerAssignments.find((item) => item.departmentId === department.id && item.active);
             const managerAccount = managerAssignment ? staffAccounts.find((item) => item.userId === managerAssignment.managerUserId) : undefined;
+            const departmentLeadership = leadership.find((item) => item.departmentId === department.id);
+            const leaderLabel = (key: "teamLead" | "hr" | "manager", fallback: string) => {
+                if (!isBackendConfigured) return fallback;
+                if (leadershipStatus === "loading") return "Loading…";
+                if (leadershipStatus === "error" || !departmentLeadership) return "Unavailable";
+                const leader = departmentLeadership[key];
+                return leader ? leader.fullName || "Assigned" : "Not assigned";
+            };
             const activeLeadEmployeeIds = new Set(teamLeadAssignments.filter((item) => item.active)
                 .map((item) => item.teamLeadEmployeeId));
             const eligibleLeadEmployees = roster.filter((employee) => {
@@ -7884,9 +7906,9 @@ function OrganizationView({ role, userEmail, departments, employees, staffAccoun
                     <span className="org-status"><i className={department.active ? "active" : ""} />{department.active ? "Active" : "Inactive"}</span></div>
                 <small>{department.code}</small><h3>{department.name}</h3>
                 <p><CircleUserRound size={15} /> {routingDepartment ? "Protected appointment-routing department" : "BrainServe operating department"}</p>
-                <div className="team-lead-badge"><BadgeCheck size={16} /><span><small>TEAM LEAD</small><strong>{leadEmployee?.name ?? (leadAssignment ? "Assigned Team Lead" : "Not assigned")}</strong></span></div>
-                <div className="team-lead-badge"><UserCog size={16} /><span><small>DEPARTMENT HR</small><strong>{hrAccount?.fullName ?? (hrAssignment ? "Assigned HR Admin" : "Not assigned")}</strong></span></div>
-                <div className="team-lead-badge"><ShieldCheck size={16} /><span><small>DEPARTMENT MANAGER</small><strong>{managerAccount?.fullName ?? (managerAssignment ? "Assigned Manager" : "Not assigned")}</strong></span></div>
+                <div className="team-lead-badge"><BadgeCheck size={16} /><span><small>TEAM LEAD</small><strong>{leaderLabel("teamLead", leadEmployee?.name ?? (leadAssignment ? "Assigned Team Lead" : "Not assigned"))}</strong></span></div>
+                <div className="team-lead-badge"><UserCog size={16} /><span><small>DEPARTMENT HR</small><strong>{leaderLabel("hr", hrAccount?.fullName ?? (hrAssignment ? "Assigned HR Admin" : "Not assigned"))}</strong></span></div>
+                <div className="team-lead-badge"><ShieldCheck size={16} /><span><small>DEPARTMENT MANAGER</small><strong>{leaderLabel("manager", managerAccount?.fullName ?? (managerAssignment ? "Assigned Manager" : "Not assigned"))}</strong></span></div>
                 <div className="org-card-metrics"><span><strong>{memberCount}</strong><small>People</small></span><span><strong>{activeCount}</strong><small>Active</small></span><span><strong>{summary?.onLeaveEmployees ?? fallbackMembers.filter((item) => item.status === "On leave").length}</strong><small>On leave</small></span></div>
                 <div className="org-card-actions">
                     <button type="button" className="button button-secondary" onClick={() => void openDepartment(department)}

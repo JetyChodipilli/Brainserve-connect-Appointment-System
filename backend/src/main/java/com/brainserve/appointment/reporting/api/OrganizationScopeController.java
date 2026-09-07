@@ -77,5 +77,23 @@ public class OrganizationScopeController {
 
         return organization.findDepartment(departmentId).stream().toList();
     }
-}
 
+    @GetMapping("/leadership")
+    @PreAuthorize("hasAnyRole('CEO','HR_ADMIN','MANAGER','TEAM_LEAD','EMPLOYEE')")
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    List<DepartmentLeadership> leadership(@AuthenticationPrincipal Jwt jwt) {
+        // Resolve scope from the authenticated actor, never from client-supplied IDs.
+        return visible(jwt).stream().map(department -> new DepartmentLeadership(
+                department.id(),
+                teamLeads.activeForDepartment(department.id())
+                        .map(assignment -> new Leader(assignment.fullName())).orElse(null),
+                departmentHrs.activeForDepartment(department.id())
+                        .map(assignment -> new Leader(assignment.fullName())).orElse(null),
+                managers.activeForDepartment(department.id())
+                        .map(assignment -> new Leader(assignment.fullName())).orElse(null)
+        )).toList();
+    }
+
+    record Leader(String fullName) {}
+    record DepartmentLeadership(UUID departmentId, Leader teamLead, Leader hr, Leader manager) {}
+}

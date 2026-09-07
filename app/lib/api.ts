@@ -1341,6 +1341,12 @@ export const brainServeApi = {
   visibleDepartments() {
     return apiRequest<Array<{ id: string; code: string; name: string; active: boolean; version: number }>>("/departments/visible");
   },
+  departmentLeadership() {
+    return apiRequest<Array<{ departmentId: string;
+      teamLead: { fullName: string } | null;
+      hr: { fullName: string } | null;
+      manager: { fullName: string } | null }>>("/departments/leadership");
+  },
   myProfile() {
     return apiRequest<MyProfile>("/profile/me");
   },
